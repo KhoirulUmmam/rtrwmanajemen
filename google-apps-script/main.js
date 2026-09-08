@@ -1,7 +1,7 @@
 // --- KONFIGURASI ---
 // Ganti ID Spreadsheet ini dengan ID Spreadsheet Anda yang sebenarnya
 const SPREADSHEET_ID = "YOUR_SPREADSHEET_ID"; 
-// Ganti ID Folder Drive ini dengan ID Folder tempat menyimpan foto laporan (Opsional, jika kosong akan di root)
+// Ganti ID Folder Drive ini dengan ID Folder tempat menyimpan foto Reports (Opsional, jika kosong akan di root)
 const UPLOAD_FOLDER_ID = ""; 
 
 function doGet(e) {
@@ -9,17 +9,17 @@ function doGet(e) {
   const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
 
   if (action == "getResidents") {
-    return getData(ss, "Warga");
+    return getData(ss, "Residents"); 
   } else if (action == "getAnnouncements") {
-    return getData(ss, "Pengumuman");
+    return getData(ss, "Announcements");
   } else if (action == "getLetters") {
-    return getData(ss, "Surat");
+    return getData(ss, "Letters");
   } else if (action == "getTransactions") {
-    return getData(ss, "Keuangan");
+    return getData(ss, "Transactions");
   } else if (action == "getReports") {
-    return getData(ss, "Laporan");
+    return getData(ss, "Reports");
   } else if (action == "getAdmins") {
-    return getData(ss, "Admin");
+    return getData(ss, "Admins");
   }
 
   return responseJSON({ error: "Action not found" });
@@ -33,15 +33,15 @@ function doPost(e) {
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
 
     if (action == "addResident") {
-      return addRow(ss, "Warga", data);
+      return addRow(ss, "Residents", data);
     } else if (action == "updateResidentPhone") {
       return updateResidentPhone(ss, data.nik, data.phone);
     } else if (action == "addAnnouncement") {
-      return addRow(ss, "Pengumuman", data);
+      return addRow(ss, "Announcements", data);
     } else if (action == "addLetter") {
-      return addRow(ss, "Surat", data);
+      return addRow(ss, "Letters", data);
     } else if (action == "addTransaction") {
-      return addRow(ss, "Keuangan", data);
+      return addRow(ss, "Transactions", data);
     } else if (action == "addReport") {
       return addReport(ss, data);
     } else if (action == "updateReportStatus") {
@@ -85,12 +85,12 @@ function getData(ss, sheetName) {
 function getHeaderKey(sheetName, index) {
   // Mapping index to key based on sheet
   const schemas = {
-    "Warga": ["id", "name", "nik", "address", "rt", "rw", "status", "phone", "gender", "maritalStatus"],
-    "Pengumuman": ["id", "title", "content", "date", "rt"],
-    "Surat": ["id", "residentName", "type", "status", "date", "rt"],
-    "Keuangan": ["id", "type", "amount", "category", "description", "date", "rt"],
-    "Laporan": ["id", "residentId", "residentName", "title", "description", "date", "status", "rt", "image"],
-    "Admin": ["id", "username", "password", "role", "rtId", "name"]
+    "Residents": ["id", "name", "nik", "address", "rt", "rw", "status", "phone", "gender", "maritalStatus", "familyRelationship", "familyCardNumber", "password"],
+    "Announcements": ["id", "title", "content", "date", "rt"],
+    "Letters": ["id", "residentName", "type", "status", "date", "rt", "content"],
+    "Transactions": ["id", "type", "amount", "category", "description", "date", "rt"],
+    "Reports": ["id", "residentId", "residentName", "title", "description", "date", "status", "rt", "image"],
+    "Admins": ["id", "username", "password", "role", "rtId", "name"]
   };
   
   const keys = schemas[sheetName] || [];
@@ -105,11 +105,11 @@ function addRow(ss, sheetName, data) {
   const keys = getHeaderKey(sheetName, -1); // Dummy call to get schema keys logic if needed, but here we construct array
   // Better: construct array based on schema order
   const schema = {
-    "Warga": ["name", "nik", "address", "rt", "rw", "status", "phone", "gender", "maritalStatus"],
-    "Pengumuman": ["title", "content", "date", "rt"],
-    "Surat": ["residentName", "type", "status", "date", "rt"],
-    "Keuangan": ["type", "amount", "category", "description", "date", "rt"],
-    // Laporan handled separately
+    "Residents": ["name", "nik", "address", "rt", "rw", "status", "phone", "gender", "maritalStatus", "familyRelationship", "familyCardNumber", "password"],
+    "Announcements": ["title", "content", "date", "rt"],
+    "Letters": ["residentName", "type", "status", "date", "rt", "content"],
+    "Transactions": ["type", "amount", "category", "description", "date", "rt"],
+    // Reports handled separately
   };
 
   if (!schema[sheetName]) return responseJSON({ error: "Schema not found" });
@@ -124,7 +124,7 @@ function addRow(ss, sheetName, data) {
 }
 
 function addReport(ss, data) {
-  const ws = ss.getSheetByName("Laporan");
+  const ws = ss.getSheetByName("Reports");
   // If ID is not number (e.g. header), start at 1
   let lastId = 0;
   if (ws.getLastRow() > 1) {
@@ -170,7 +170,7 @@ function addReport(ss, data) {
 }
 
 function updateReportStatus(ss, id, status) {
-  const ws = ss.getSheetByName("Laporan");
+  const ws = ss.getSheetByName("Reports");
   const data = ws.getDataRange().getValues();
   
   // Find row with ID (Column 0)
@@ -185,7 +185,7 @@ function updateReportStatus(ss, id, status) {
 }
 
 function updateResidentPhone(ss, nik, newPhone) {
-  const ws = ss.getSheetByName("Warga");
+  const ws = ss.getSheetByName("Residents");
   const data = ws.getDataRange().getValues();
   
   // Find row with NIK (Column 2 -> Index 2)
