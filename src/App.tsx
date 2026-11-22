@@ -18,14 +18,18 @@ import { Login } from "@/pages/Login";
 import { Profile } from "@/pages/Profile";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 
-function ProtectedRoute({ children, requireAdmin = false }: { children: React.ReactNode, requireAdmin?: boolean }) {
-  const { role } = useAuth();
-  
+function ProtectedRoute({ children, requireAdmin = false, requireSuperAdmin = false }: { children: React.ReactNode, requireAdmin?: boolean, requireSuperAdmin?: boolean }) {
+  const { role, isSuperAdmin } = useAuth();
+
   if (!role) {
     return <Navigate to="/login" replace />;
   }
 
   if (requireAdmin && role !== 'admin') {
+    return <Navigate to="/" replace />;
+  }
+
+  if (requireSuperAdmin && !isSuperAdmin) {
     return <Navigate to="/" replace />;
   }
 
@@ -60,7 +64,7 @@ export default function App() {
               </ProtectedRoute>
             } />
             <Route path="settings" element={
-              <ProtectedRoute requireAdmin>
+              <ProtectedRoute requireSuperAdmin>
                 <Settings />
               </ProtectedRoute>
             } />

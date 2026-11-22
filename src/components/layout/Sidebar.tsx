@@ -20,7 +20,7 @@ export function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
-  const { role, user, rtId, logout } = useAuth();
+  const { role, isSuperAdmin, user, rtId, logout } = useAuth();
 
   const menuItems = [
     { icon: LayoutDashboard, label: "Dashboard", path: "/", roles: ['admin', 'resident'] },
@@ -105,7 +105,7 @@ export function Sidebar() {
           </nav>
 
           <div className="p-4 border-t border-white/10">
-            {role === 'admin' && (
+            {isSuperAdmin && (
               <Link to="/settings" className="flex items-center gap-3 px-4 py-3 w-full rounded-xl text-sm font-medium text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-200">
                 <Settings size={18} />
                 Pengaturan

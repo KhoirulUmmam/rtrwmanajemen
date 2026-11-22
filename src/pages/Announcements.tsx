@@ -2,11 +2,15 @@ import React, { useState, useEffect } from "react";
 import { Bell, Calendar, Plus, X, Pencil, Trash2, Send } from "lucide-react";
 import { Announcement } from "@/types";
 import { useAuth } from "@/context/AuthContext";
+import { BroadcastCard } from "@/components/settings/BroadcastCard";
 
 const emptyForm = { title: "", content: "", broadcast: true };
 
 export function Announcements() {
-  const { role } = useAuth();
+  const { role, isSuperAdmin } = useAuth();
+  // Broadcast WA hanya untuk pengurus RT (super admin tidak terikat satu RT)
+  const canBroadcast = role === 'admin' && !isSuperAdmin;
+  const [waOpen, setWaOpen] = useState(false);
   const [announcementsList, setAnnouncementsList] = useState<Announcement[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -32,6 +36,14 @@ export function Announcements() {
   useEffect(() => {
     fetchData();
   }, []);
+
+  useEffect(() => {
+    if (!canBroadcast) return;
+    fetch('/api/whatsapp/status')
+      .then((r) => r.json())
+      .then((s) => setWaOpen(s?.status === 'open'))
+      .catch(() => setWaOpen(false));
+  }, [canBroadcast]);
 
   const flash = (message: string) => {
     setNotice(message);
@@ -115,6 +127,8 @@ export function Announcements() {
       {notice && (
         <div className="p-4 bg-green-50 border border-green-100 rounded-xl text-sm text-green-700">{notice}</div>
       )}
+
+      {canBroadcast && <BroadcastCard disabled={!waOpen} />}
 
       <div className="grid gap-4">
         {isLoading && <p className="text-center text-slate-400 py-8">Memuat pengumuman...</p>}

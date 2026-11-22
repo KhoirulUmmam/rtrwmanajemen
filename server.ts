@@ -718,9 +718,11 @@ app.post("/api/vps-url", requireSuperAdmin, (req, res) => {
   res.json({ message: "URL VPS disimpan sementara. Untuk permanen, atur VPS_WHATSAPP_URL di environment." });
 });
 
-// ── WhatsApp (pengurus) ─────────────────────────────────────────────────────
+// ── WhatsApp ────────────────────────────────────────────────────────────────
+// Sesi bot hanya satu untuk seluruh aplikasi, jadi menyambung/memutus bot khusus super admin.
+// Pengurus RT tetap bisa melihat status & broadcast ke warga RT-nya.
 
-app.post("/api/whatsapp/start", requireAdmin, wrap(async (req, res) => {
+app.post("/api/whatsapp/start", requireSuperAdmin, wrap(async (req, res) => {
   let base = process.env.APP_URL;
   if (!base && req.headers.host) {
     const protocol = req.headers.host.includes("localhost") ? "http" : "https";
@@ -741,7 +743,7 @@ app.get("/api/whatsapp/status", requireAdmin, async (req, res) => {
   }
 });
 
-app.post("/api/whatsapp/logout", requireAdmin, wrap(async (req, res) => {
+app.post("/api/whatsapp/logout", requireSuperAdmin, wrap(async (req, res) => {
   res.json(await vpsFetch(`/session/${getSessionId(req)}/logout`, { method: "POST" }));
 }));
 
