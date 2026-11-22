@@ -457,8 +457,9 @@ app.post("/api/announcements", requireAdmin, wrap(async (req, res) => {
 
   const created: any = await sheets.create("Announcements", { ...data, date: today(), rt: targetRt(req, req.body.rt) });
 
+  // Broadcast WA sementara khusus super admin (mengurangi risiko nomor bot diblokir)
   let broadcast = null;
-  if (req.body.broadcast) {
+  if (req.body.broadcast && req.auth!.role === "superadmin") {
     broadcast = await broadcastWa(req, await residentPhonesInRt(created.rt), announcementMessage(created))
       .catch((e) => ({ status: "error", error: e.message }));
   }
@@ -477,7 +478,7 @@ app.delete("/api/announcements/:id", requireAdmin, wrap(async (req, res) => {
   res.json({ status: "deleted" });
 }));
 
-app.post("/api/announcements/:id/broadcast", requireAdmin, wrap(async (req, res) => {
+app.post("/api/announcements/:id/broadcast", requireSuperAdmin, wrap(async (req, res) => {
   const a = await getScopedOr404("Announcements", req.params.id, req);
   res.status(202).json(await broadcastWa(req, await residentPhonesInRt(a.rt), announcementMessage(a)));
 }));
@@ -753,7 +754,8 @@ app.post("/api/vps-url", requireSuperAdmin, (req, res) => {
 
 // ── WhatsApp ────────────────────────────────────────────────────────────────
 // Sesi bot hanya satu untuk seluruh aplikasi, jadi menyambung/memutus bot khusus super admin.
-// Pengurus RT tetap bisa melihat status & broadcast ke warga RT-nya.
+// Broadcast juga sementara khusus super admin agar nomor bot tidak diblokir WhatsApp.
+// Notifikasi personal (status surat/laporan, verifikasi) tetap berjalan untuk semua RT.
 
 app.post("/api/whatsapp/start", requireSuperAdmin, wrap(async (req, res) => {
   let base = process.env.APP_URL;
@@ -780,12 +782,14 @@ app.post("/api/whatsapp/logout", requireSuperAdmin, wrap(async (req, res) => {
   res.json(await vpsFetch(`/session/${getSessionId(req)}/logout`, { method: "POST" }));
 }));
 
-/** Broadcast pesan bebas ke seluruh warga aktif di RT pengurus (mis. pengingat iuran). */
-app.post("/api/whatsapp/broadcast", requireAdmin, wrap(async (req, res) => {
+/** Broadcast pesan bebas (khusus super admin). rt = kode RT tujuan, atau "ALL" untuk semua RT. */
+app.post("/api/whatsapp/broadcast", requireSuperAdmin, wrap(async (req, res) => {
   const text = String(req.body.text ?? "").trim();
   if (text.length < 5) throw new HttpError(422, "Isi pesan terlalu pendek");
-  const rt = targetRt(req, req.body.rt);
-  const recipients = await residentPhonesInRt(rt);
+  const target = upper(req.body.rt);
+  // RT wajib dipilih eksplisit; tanpa ini residentPhonesInRt("") mengirim ke SEMUA warga
+  if (!target) throw new HttpError(422, "Pilih RT tujuan broadcast");
+  const recipients = await residentPhonesInRt(target === "ALL" ? "" : target);
   if (!recipients.length) throw new HttpError(422, "Belum ada warga dengan nomor WhatsApp di RT ini");
   res.status(202).json(await broadcastWa(req, recipients, text));
 }));

@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { useAuth } from "@/context/AuthContext";
 import React from "react";
 import { AdminManager } from "@/components/settings/AdminManager";
+import { BroadcastCard } from "@/components/settings/BroadcastCard";
 
 interface DbStatus {
   status: string;
@@ -357,6 +358,8 @@ export function Settings() {
           </div>
         </div>
       )}
+
+      {isSuperAdmin && <BroadcastCard disabled={waStatus.status !== 'open'} />}
     </div>
   );
 }

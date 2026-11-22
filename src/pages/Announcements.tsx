@@ -2,15 +2,14 @@ import React, { useState, useEffect } from "react";
 import { Bell, Calendar, Plus, X, Pencil, Trash2, Send } from "lucide-react";
 import { Announcement } from "@/types";
 import { useAuth } from "@/context/AuthContext";
-import { BroadcastCard } from "@/components/settings/BroadcastCard";
 
-const emptyForm = { title: "", content: "", broadcast: true };
+// Default tidak dikirim ke WA: broadcast harus dicentang dengan sadar
+const emptyForm = { title: "", content: "", broadcast: false };
 
 export function Announcements() {
   const { role, isSuperAdmin } = useAuth();
-  // Broadcast WA hanya untuk pengurus RT (super admin tidak terikat satu RT)
-  const canBroadcast = role === 'admin' && !isSuperAdmin;
-  const [waOpen, setWaOpen] = useState(false);
+  // Broadcast WA sementara khusus super admin (mengurangi risiko nomor bot diblokir)
+  const canBroadcast = isSuperAdmin;
   const [announcementsList, setAnnouncementsList] = useState<Announcement[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -36,14 +35,6 @@ export function Announcements() {
   useEffect(() => {
     fetchData();
   }, []);
-
-  useEffect(() => {
-    if (!canBroadcast) return;
-    fetch('/api/whatsapp/status')
-      .then((r) => r.json())
-      .then((s) => setWaOpen(s?.status === 'open'))
-      .catch(() => setWaOpen(false));
-  }, [canBroadcast]);
 
   const flash = (message: string) => {
     setNotice(message);
@@ -102,7 +93,8 @@ export function Announcements() {
   };
 
   const handleBroadcast = async (a: Announcement) => {
-    if (!confirm(`Kirim ulang "${a.title}" ke WhatsApp semua warga?`)) return;
+    const target = (a as any).rt ? `warga ${(a as any).rt}` : 'SEMUA warga di semua RT';
+    if (!confirm(`Kirim "${a.title}" ke WhatsApp ${target}?`)) return;
     const res = await fetch(`/api/announcements/${a.id}/broadcast`, { method: 'POST' });
     const data = await res.json().catch(() => ({}));
     if (res.ok) flash(data.total ? `Sedang dikirim ke ${data.total} warga.` : "Tidak ada warga dengan nomor WhatsApp.");
@@ -128,7 +120,9 @@ export function Announcements() {
         <div className="p-4 bg-green-50 border border-green-100 rounded-xl text-sm text-green-700">{notice}</div>
       )}
 
-      {canBroadcast && <BroadcastCard disabled={!waOpen} />}
+      {role === 'admin' && !isSuperAdmin && (
+        <p className="text-xs text-slate-400">Pengumuman tampil di aplikasi warga. Pengiriman massal lewat WhatsApp sementara hanya dilakukan oleh super admin.</p>
+      )}
 
       <div className="grid gap-4">
         {isLoading && <p className="text-center text-slate-400 py-8">Memuat pengumuman...</p>}
@@ -150,9 +144,11 @@ export function Announcements() {
               </div>
               {role === 'admin' && (
                 <div className="flex gap-1 shrink-0">
-                  <button onClick={() => handleBroadcast(announcement)} className="p-2 rounded-lg text-green-600 hover:bg-green-50" title="Kirim ke WhatsApp warga">
-                    <Send size={18} />
-                  </button>
+                  {canBroadcast && (
+                    <button onClick={() => handleBroadcast(announcement)} className="p-2 rounded-lg text-green-600 hover:bg-green-50" title="Kirim ke WhatsApp warga">
+                      <Send size={18} />
+                    </button>
+                  )}
                   <button onClick={() => openEdit(announcement)} className="p-2 rounded-lg text-slate-500 hover:bg-slate-100" title="Ubah">
                     <Pencil size={18} />
                   </button>
@@ -205,7 +201,7 @@ export function Announcements() {
                 />
               </div>
 
-              {!editingId && (
+              {!editingId && canBroadcast && (
                 <label className="flex items-start gap-3 p-3 bg-green-50 border border-green-100 rounded-lg cursor-pointer">
                   <input
                     type="checkbox"
@@ -214,7 +210,7 @@ export function Announcements() {
                     className="mt-0.5 h-4 w-4 rounded border-slate-300 text-green-600 focus:ring-green-500"
                   />
                   <span className="text-sm text-green-800">
-                    <span className="font-medium">Kirim juga ke WhatsApp semua warga</span><br />
+                    <span className="font-medium">Kirim juga ke WhatsApp semua warga di semua RT</span><br />
                     <span className="text-green-700/80">Dikirim bertahap dengan jeda beberapa detik per warga.</span>
                   </span>
                 </label>
