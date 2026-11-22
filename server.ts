@@ -332,9 +332,17 @@ app.post("/api/whatsapp/webhook", wrap(async (req, res) => {
 // =============================================================================
 app.use("/api", requireAuth);
 
+/** Super admin utama dari env (SUPERADMIN_PASSWORD) tidak punya baris di sheet Admins. */
+const isEnvSuperAdmin = (auth: AuthUser) => auth.role === "superadmin" && auth.id === "superadmin";
+
 app.get("/api/auth/me", wrap(async (req, res) => {
   const auth = req.auth!;
-  if (auth.role !== "resident") return res.json({ ...auth, rtId: auth.rt });
+  if (auth.role !== "resident") {
+    if (isEnvSuperAdmin(auth)) return res.json({ ...auth, rtId: auth.rt, envAccount: true });
+    const admin = await sheets.find("Admins", auth.id);
+    if (!admin) throw new HttpError(401, "Akun tidak ditemukan");
+    return res.json({ ...publicAdmin(admin), role: auth.role, rt: auth.rt, rtId: auth.rt });
+  }
   const resident = await sheets.find("Residents", auth.id);
   if (!resident) throw new HttpError(401, "Akun tidak ditemukan");
   res.json({ ...publicResident(resident), role: "resident", rtId: auth.rt });
@@ -685,6 +693,31 @@ app.put("/api/admins/:id", requireSuperAdmin, wrap(async (req, res) => {
     data.password = hashPassword(data.password);
   } else delete data.password;
   res.json(publicAdmin(await sheets.update("Admins", admin.id, data)));
+}));
+
+/** Pengurus mengubah akunnya sendiri: nama, nomor WA, dan password (wajib password lama). */
+app.put("/api/account", requireAdmin, wrap(async (req, res) => {
+  const auth = req.auth!;
+  if (isEnvSuperAdmin(auth)) {
+    throw new HttpError(400, "Akun super admin utama diatur lewat environment SUPERADMIN_PASSWORD.");
+  }
+  const admin: any = await sheets.find("Admins", auth.id);
+  if (!admin) throw new HttpError(404, "Akun tidak ditemukan");
+
+  const data: any = pick(req.body, ["name", "phone"]);
+  if (data.name !== undefined && !data.name) throw new HttpError(422, "Nama wajib diisi");
+
+  if (req.body.password) {
+    if (!verifyPassword(String(req.body.currentPassword ?? ""), admin.password)) {
+      throw new HttpError(422, "Password lama salah");
+    }
+    if (String(req.body.password).length < 6) throw new HttpError(422, "Password minimal 6 karakter");
+    data.password = hashPassword(String(req.body.password));
+  }
+  if (!Object.keys(data).length) throw new HttpError(422, "Tidak ada perubahan");
+
+  const updated = await sheets.update("Admins", admin.id, data);
+  res.json({ ...publicAdmin(updated), role: auth.role, rt: auth.rt, rtId: auth.rt });
 }));
 
 app.delete("/api/admins/:id", requireSuperAdmin, wrap(async (req, res) => {

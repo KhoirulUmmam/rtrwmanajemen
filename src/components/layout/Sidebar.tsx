@@ -8,7 +8,8 @@ import {
   LogOut,
   Menu,
   X,
-  AlertCircle
+  AlertCircle,
+  UserCircle
 } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
@@ -29,7 +30,7 @@ export function Sidebar() {
     { icon: FileText, label: "Surat Pengantar", path: "/letters", roles: ['admin', 'resident'] },
     { icon: Bell, label: "Pengumuman", path: "/announcements", roles: ['admin', 'resident'] },
     { icon: AlertCircle, label: "Laporan Warga", path: "/reports", roles: ['admin', 'resident'] },
-    { icon: Users, label: "Profil Saya", path: "/profile", roles: ['resident'] },
+    { icon: UserCircle, label: "Profil Saya", path: "/profile", roles: ['admin', 'resident'] },
   ];
 
   const handleLogout = () => {
