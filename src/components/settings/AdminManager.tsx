@@ -125,7 +125,8 @@ export function AdminManager() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium text-slate-700">Kode RT</label>
-                  <input required value={form.rtId} onChange={e => setForm({ ...form, rtId: e.target.value.toUpperCase() })} placeholder="RT01" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono uppercase" />
+                  {/* Tanpa toUpperCase() saat mengetik (merusak input di keyboard HP); server menormalkan ke huruf besar */}
+                  <input required value={form.rtId} onChange={e => setForm({ ...form, rtId: e.target.value })} autoCapitalize="characters" autoCorrect="off" autoComplete="off" spellCheck={false} placeholder="RT01" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm font-mono uppercase" />
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium text-slate-700">Peran</label>

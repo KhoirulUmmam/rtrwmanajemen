@@ -179,7 +179,14 @@ export function Login() {
                 type="text"
                 required
                 value={rtCode}
-                onChange={(e) => setRtCode(e.target.value.toUpperCase())}
+                // Jangan toUpperCase() di sini: di keyboard HP (Gboard dkk.) mengubah teks saat
+                // mengetik merusak kata yang sedang disusun, sehingga "RT" hilang saat mengetik "01".
+                // Huruf besar cukup lewat CSS `uppercase`; server sudah menormalkan kode RT.
+                onChange={(e) => setRtCode(e.target.value)}
+                autoCapitalize="characters"
+                autoCorrect="off"
+                autoComplete="off"
+                spellCheck={false}
                 className="w-full px-4 py-3.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 bg-slate-50/50 focus:bg-white transition-all font-mono uppercase"
                 placeholder="Contoh: RT01"
               />
