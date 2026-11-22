@@ -249,6 +249,39 @@ export function Residents() {
   });
   const pendingCount = residentsList.filter(r => (r as any).verified === 'pending').length;
 
+  const statusBadgeClass = (status: string) =>
+    status === 'Tetap' ? 'bg-green-100 text-green-800' :
+    status === 'Kontrak' ? 'bg-blue-100 text-blue-800' :
+    status === 'Kost' ? 'bg-orange-100 text-orange-800' :
+    status === 'Pindah' ? 'bg-yellow-100 text-yellow-800' :
+    'bg-red-100 text-red-800';
+
+  /** Tombol aksi per warga (dipakai tabel desktop & kartu HP). */
+  const renderActions = (resident: Resident) => (
+    <>
+      {(resident as any).verified === 'pending' && (
+        <button onClick={() => handleVerify(resident)} className="p-1.5 hover:bg-green-50 rounded text-green-600 hover:text-green-700" title="Verifikasi Pendaftar">
+          <CheckCircle size={18} />
+        </button>
+      )}
+      <button onClick={() => handleShowProfile(resident)} className="p-1.5 hover:bg-blue-50 rounded text-blue-600 hover:text-blue-700" title="Lihat Profil">
+        <User size={18} />
+      </button>
+      <button onClick={() => handleShowCard(resident)} className="p-1.5 hover:bg-indigo-50 rounded text-indigo-600 hover:text-indigo-700" title="Kartu Warga">
+        <CreditCard size={18} />
+      </button>
+      <button onClick={() => handleMutation(resident)} className="p-1.5 hover:bg-red-50 rounded text-red-600 hover:text-red-700" title="Mutasi Warga">
+        <FileText size={18} />
+      </button>
+      <button onClick={() => openEdit(resident)} className="p-1.5 hover:bg-slate-100 rounded text-slate-600 hover:text-slate-800" title="Ubah Data">
+        <Pencil size={18} />
+      </button>
+      <button onClick={() => handleDelete(resident)} className="p-1.5 hover:bg-red-50 rounded text-slate-400 hover:text-red-600" title="Hapus Data">
+        <Trash2 size={18} />
+      </button>
+    </>
+  );
+
   return (
     <div className="space-y-6">
       {pendingCount > 0 && (
@@ -270,8 +303,8 @@ export function Residents() {
             className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
         </div>
-        <div className="flex gap-2 w-full sm:w-auto">
-          <button 
+        <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+          <button
             onClick={handleExport}
             className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
           >
@@ -305,7 +338,42 @@ export function Residents() {
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Tampilan HP: daftar kartu */}
+        <div className="lg:hidden divide-y divide-slate-100">
+          {isLoading && <p className="px-4 py-10 text-center text-sm text-slate-400">Memuat data warga...</p>}
+          {!isLoading && filteredResidents.length === 0 && (
+            <p className="px-4 py-10 text-center text-sm text-slate-400">Tidak ada data warga yang cocok.</p>
+          )}
+          {filteredResidents.map((resident) => (
+            <div key={resident.id} className="p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-semibold text-slate-900 break-words">{resident.name}</p>
+                  <p className="text-xs text-slate-500 font-mono mt-0.5 break-all">{resident.nik}</p>
+                </div>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span className={`inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium ${statusBadgeClass(resident.status)}`}>{resident.status}</span>
+                  {(resident as any).verified === 'pending' && (
+                    <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Belum diverifikasi</span>
+                  )}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 mt-3 text-xs">
+                <div><span className="text-slate-400">L/P:</span> <span className="text-slate-700">{resident.gender === 'Laki-laki' ? 'Laki-laki' : 'Perempuan'}</span></div>
+                <div><span className="text-slate-400">RT/RW:</span> <span className="text-slate-700">{resident.rt}/{resident.rw}</span></div>
+                <div><span className="text-slate-400">Nikah:</span> <span className="text-slate-700">{resident.maritalStatus || '-'}</span></div>
+                <div><span className="text-slate-400">Hubungan:</span> <span className="text-slate-700">{resident.familyRelationship || '-'}</span></div>
+                <div className="col-span-2"><span className="text-slate-400">Alamat:</span> <span className="text-slate-700 break-words">{resident.address || '-'}</span></div>
+              </div>
+              <div className="flex flex-wrap gap-1 mt-3 pt-3 border-t border-slate-100">
+                {renderActions(resident)}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Tampilan desktop: tabel (bisa digeser horizontal bila sempit) */}
+        <div className="hidden lg:block overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
@@ -329,71 +397,23 @@ export function Residents() {
               )}
               {filteredResidents.map((resident) => (
                 <tr key={resident.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-6 py-4 font-medium text-slate-900">{resident.name}</td>
-                  <td className="px-6 py-4 text-slate-500 font-mono">{resident.nik}</td>
+                  <td className="px-6 py-4 font-medium text-slate-900 whitespace-nowrap">{resident.name}</td>
+                  <td className="px-6 py-4 text-slate-500 font-mono whitespace-nowrap">{resident.nik}</td>
                   <td className="px-6 py-4 text-slate-500">{resident.gender === 'Laki-laki' ? 'L' : 'P'}</td>
                   <td className="px-6 py-4 text-slate-500">{resident.maritalStatus}</td>
                   <td className="px-6 py-4 text-slate-500">{resident.familyRelationship}</td>
                   <td className="px-6 py-4 text-slate-500">{resident.address}</td>
                   <td className="px-6 py-4 text-slate-500">{resident.rt}/{resident.rw}</td>
                   <td className="px-6 py-4">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium
-                      ${resident.status === 'Tetap' ? 'bg-green-100 text-green-800' : 
-                        resident.status === 'Kontrak' ? 'bg-blue-100 text-blue-800' : 
-                        resident.status === 'Kost' ? 'bg-orange-100 text-orange-800' :
-                        resident.status === 'Pindah' ? 'bg-yellow-100 text-yellow-800' :
-                        'bg-red-100 text-red-800'}`}>
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${statusBadgeClass(resident.status)}`}>
                       {resident.status}
                     </span>
                     {(resident as any).verified === 'pending' && (
-                      <span className="ml-1 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Belum diverifikasi</span>
+                      <span className="ml-1 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium whitespace-nowrap bg-amber-100 text-amber-800">Belum diverifikasi</span>
                     )}
                   </td>
-                  <td className="px-6 py-4 flex gap-2">
-                    {(resident as any).verified === 'pending' && (
-                      <button
-                        onClick={() => handleVerify(resident)}
-                        className="p-1 hover:bg-green-50 rounded text-green-600 hover:text-green-700"
-                        title="Verifikasi Pendaftar"
-                      >
-                        <CheckCircle size={18} />
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleShowProfile(resident)}
-                      className="p-1 hover:bg-blue-50 rounded text-blue-600 hover:text-blue-700"
-                      title="Lihat Profil"
-                    >
-                      <User size={18} />
-                    </button>
-                    <button 
-                      onClick={() => handleShowCard(resident)}
-                      className="p-1 hover:bg-indigo-50 rounded text-indigo-600 hover:text-indigo-700"
-                      title="Kartu Warga"
-                    >
-                      <CreditCard size={18} />
-                    </button>
-                    <button 
-                      onClick={() => handleMutation(resident)}
-                      className="p-1 hover:bg-red-50 rounded text-red-600 hover:text-red-700"
-                      title="Mutasi Warga"
-                    >
-                      <FileText size={18} />
-                    </button>
-                    <button
-                      onClick={() => openEdit(resident)}
-                      className="p-1 hover:bg-slate-100 rounded text-slate-600 hover:text-slate-800"
-                      title="Ubah Data"
-                    >
-                      <Pencil size={18} />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(resident)}
-                      className="p-1 hover:bg-red-50 rounded text-slate-400 hover:text-red-600"
-                      title="Hapus Data"
-                    >
-                      <Trash2 size={18} />
-                    </button>
+                  <td className="px-6 py-4">
+                    <div className="flex gap-1">{renderActions(resident)}</div>
                   </td>
                 </tr>
               ))}
@@ -435,7 +455,7 @@ export function Residents() {
                 />
               </div>
               
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-700">NIK</label>
                   <input 
@@ -489,7 +509,7 @@ export function Residents() {
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-700">Jenis Kelamin</label>
                   <select 
@@ -545,7 +565,7 @@ export function Residents() {
                 />
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <label className="text-sm font-medium text-slate-700">RT</label>
                   <input 

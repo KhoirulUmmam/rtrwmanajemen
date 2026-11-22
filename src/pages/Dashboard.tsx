@@ -1,4 +1,4 @@
-import { Users, FileText, Wallet, ArrowUpRight, ArrowDownRight, Calendar, MapPin, Clock, Heart, User } from 'lucide-react';
+import { Users, Wallet, ArrowUpRight, ArrowDownRight, Calendar, Heart, User, Minus } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { Resident, Transaction } from '@/types';
@@ -12,15 +12,49 @@ import {
   ResponsiveContainer,
   PieChart,
   Pie,
-  Cell
+  Cell,
+  Legend
 } from 'recharts';
 
-import { useAuth } from '@/context/AuthContext';
+import {
+  type Period, PERIOD_OPTIONS, PREVIOUS_LABEL, periodRange, previousRange, inRange,
+  parseDate, formatRp, formatCompact, percentChange,
+} from '@/lib/period';
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
+
+type Grouping = 'daily' | 'monthly' | 'yearly';
+const GROUPING_OPTIONS: { value: Grouping; label: string }[] = [
+  { value: 'daily', label: 'Harian' },
+  { value: 'monthly', label: 'Bulanan' },
+  { value: 'yearly', label: 'Tahunan' },
+];
+
+/** Badge perbandingan dengan periode sebelumnya, dihitung dari data asli. */
+function ChangeBadge({ current, previous, period, positiveIsGood }: { current: number; previous: number; period: Period; positiveIsGood: boolean }) {
+  if (period === 'all') {
+    return <span className="text-xs text-slate-400">Seluruh transaksi</span>;
+  }
+  const pct = percentChange(current, previous);
+  if (pct === null) {
+    return <span className="text-xs text-slate-400">{current ? `Belum ada data ${PREVIOUS_LABEL[period]}` : 'Belum ada transaksi'}</span>;
+  }
+  const up = pct > 0;
+  const good = pct === 0 ? null : up === positiveIsGood;
+  const color = good === null ? 'text-slate-600 bg-slate-50 border-slate-100' : good ? 'text-emerald-600 bg-emerald-50/50 border-emerald-100/50' : 'text-red-600 bg-red-50/50 border-red-100/50';
+  const Icon = pct === 0 ? Minus : up ? ArrowUpRight : ArrowDownRight;
+  return (
+    <span className={`inline-flex flex-wrap items-center gap-x-1.5 text-xs px-2.5 py-1 rounded-md border ${color}`}>
+      <span className="inline-flex items-center font-semibold"><Icon size={14} className="mr-0.5" />{up ? '+' : ''}{pct}%</span>
+      <span className="text-slate-500 font-medium">dari {PREVIOUS_LABEL[period]}</span>
+    </span>
+  );
+}
 
 export function Dashboard() {
-  const { user } = useAuth();
+  const [period, setPeriod] = useState<Period>('month');
+  const [grouping, setGrouping] = useState<Grouping>('monthly');
   const [residents, setResidents] = useState<Resident[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [letters, setLetters] = useState<any[]>([]);
@@ -55,35 +89,51 @@ export function Dashboard() {
   }, []);
 
   const totalResidents = residents.length;
-  const pendingLetters = letters.filter(l => l.status === 'Menunggu' || l.status === 'Proses').length;
-  const totalIncome = transactions.filter(t => t.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
-  const totalExpense = transactions.filter(t => t.type === 'expense').reduce((acc, curr) => acc + curr.amount, 0);
-  
-  const processChartData = () => {
 
-    const monthlyData: Record<string, { income: number, expense: number }> = {};
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
-    
-    // Initialize last 6 months
+  // Ringkasan kas untuk periode terpilih + periode sebelumnya (untuk persentase)
+  const sumBy = (type: 'income' | 'expense', range: ReturnType<typeof periodRange>) =>
+    transactions.filter(t => t.type === type && inRange(t.date, range)).reduce((acc, t) => acc + t.amount, 0);
+  const currentRange = periodRange(period);
+  const prevRange = previousRange(period);
+  const periodIncome = sumBy('income', currentRange);
+  const periodExpense = sumBy('expense', currentRange);
+  const prevIncome = sumBy('income', prevRange);
+  const prevExpense = sumBy('expense', prevRange);
+  const periodLabel = PERIOD_OPTIONS.find(p => p.value === period)?.label;
+
+  /** Data grafik: 14 hari terakhir / 12 bulan terakhir / per tahun. */
+  const processChartData = () => {
+    const buckets = new Map<string, { label: string; income: number; expense: number }>();
     const today = new Date();
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
-      monthlyData[`${months[d.getMonth()]} ${d.getFullYear()}`] = { income: 0, expense: 0 };
+    const keyOf = (d: Date) =>
+      grouping === 'daily' ? `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+        : grouping === 'monthly' ? `${d.getFullYear()}-${d.getMonth()}`
+          : `${d.getFullYear()}`;
+
+    if (grouping === 'daily') {
+      for (let i = 13; i >= 0; i--) {
+        const d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+        buckets.set(keyOf(d), { label: `${d.getDate()} ${MONTHS[d.getMonth()]}`, income: 0, expense: 0 });
+      }
+    } else if (grouping === 'monthly') {
+      for (let i = 11; i >= 0; i--) {
+        const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+        buckets.set(keyOf(d), { label: `${MONTHS[d.getMonth()]} ${String(d.getFullYear()).slice(2)}`, income: 0, expense: 0 });
+      }
+    } else {
+      const years = transactions.map(t => parseDate(t.date)?.getFullYear()).filter(Boolean) as number[];
+      const first = Math.min(today.getFullYear() - 2, ...years);
+      for (let y = first; y <= today.getFullYear(); y++) buckets.set(String(y), { label: String(y), income: 0, expense: 0 });
     }
 
     transactions.forEach(t => {
-      const d = new Date(t.date);
-      const key = `${months[d.getMonth()]} ${d.getFullYear()}`;
-      if (monthlyData[key]) {
-        if (t.type === 'income') monthlyData[key].income += t.amount;
-        else monthlyData[key].expense += t.amount;
-      }
+      const d = parseDate(t.date);
+      const bucket = d && buckets.get(keyOf(d));
+      if (!bucket) return;
+      if (t.type === 'income') bucket.income += t.amount;
+      else bucket.expense += t.amount;
     });
-
-    return Object.entries(monthlyData).map(([month, data]) => ({
-      month,
-      ...data
-    }));
+    return [...buckets.values()];
   };
 
   const chartData = processChartData();
@@ -103,8 +153,24 @@ export function Dashboard() {
 
   return (
     <div className="space-y-6">
+      {/* Filter periode untuk kartu kas */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-slate-500">Ringkasan kas: <span className="font-semibold text-slate-700">{periodLabel}</span></p>
+        <div className="flex gap-1 p-1 bg-white border border-slate-200 rounded-xl overflow-x-auto max-w-full">
+          {PERIOD_OPTIONS.map(p => (
+            <button
+              key={p.value}
+              onClick={() => setPeriod(p.value)}
+              className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap transition-colors ${period === p.value ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-6">
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 hover:shadow-md transition-shadow relative overflow-hidden group">
           <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-bl-full -z-10 group-hover:scale-110 transition-transform duration-500"></div>
           <div className="flex justify-between items-start">
@@ -153,36 +219,33 @@ export function Dashboard() {
 
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 hover:shadow-md transition-shadow relative overflow-hidden group">
           <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-bl-full -z-10 group-hover:scale-110 transition-transform duration-500"></div>
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-sm font-medium text-slate-500">Kas Masuk (YTD)</p>
-              <h3 className="text-2xl font-bold text-slate-800 mt-2 tracking-tight">Rp {totalIncome.toLocaleString()}</h3>
+          <div className="flex justify-between items-start gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-slate-500">Kas Masuk</p>
+              <h3 className="text-xl sm:text-2xl font-bold text-slate-800 mt-2 tracking-tight break-words">{formatRp(periodIncome)}</h3>
             </div>
-            <div className="p-3 bg-emerald-500/10 rounded-xl text-emerald-600">
+            <div className="p-3 bg-emerald-500/10 rounded-xl text-emerald-600 shrink-0">
               <Wallet size={22} />
             </div>
           </div>
-          <div className="mt-6 flex items-center text-sm text-emerald-600 bg-emerald-50/50 w-fit px-2.5 py-1 rounded-md border border-emerald-100/50">
-            <ArrowUpRight size={16} className="mr-1" />
-            <span className="font-semibold">+12%</span>
-            <span className="text-slate-500 ml-1.5 font-medium">dari tahun lalu</span>
+          <div className="mt-6">
+            <ChangeBadge current={periodIncome} previous={prevIncome} period={period} positiveIsGood />
           </div>
         </div>
 
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 hover:shadow-md transition-shadow relative overflow-hidden group">
           <div className="absolute top-0 right-0 w-32 h-32 bg-red-50 rounded-bl-full -z-10 group-hover:scale-110 transition-transform duration-500"></div>
-          <div className="flex justify-between items-start">
-            <div>
-              <p className="text-sm font-medium text-slate-500">Pengeluaran (YTD)</p>
-              <h3 className="text-2xl font-bold text-slate-800 mt-2 tracking-tight">Rp {totalExpense.toLocaleString()}</h3>
+          <div className="flex justify-between items-start gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-slate-500">Pengeluaran</p>
+              <h3 className="text-xl sm:text-2xl font-bold text-slate-800 mt-2 tracking-tight break-words">{formatRp(periodExpense)}</h3>
             </div>
-            <div className="p-3 bg-red-500/10 rounded-xl text-red-600">
+            <div className="p-3 bg-red-500/10 rounded-xl text-red-600 shrink-0">
               <ArrowDownRight size={22} />
             </div>
           </div>
-          <div className="mt-6 flex items-center text-sm text-red-600 bg-red-50/50 w-fit px-2.5 py-1 rounded-md border border-red-100/50">
-            <span className="font-semibold">+5%</span>
-            <span className="text-slate-500 ml-1.5 font-medium">dari bulan lalu</span>
+          <div className="mt-6">
+            <ChangeBadge current={periodExpense} previous={prevExpense} period={period} positiveIsGood={false} />
           </div>
         </div>
       </div>
@@ -212,23 +275,38 @@ export function Dashboard() {
 
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 lg:col-span-2">
-          <h3 className="text-lg font-bold text-slate-800 mb-6 tracking-tight">Statistik Keuangan</h3>
-          <div className="h-80">
+        <div className="bg-white p-4 sm:p-6 rounded-2xl shadow-sm border border-slate-200/60 lg:col-span-2 min-w-0">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4 sm:mb-6">
+            <h3 className="text-lg font-bold text-slate-800 tracking-tight">Statistik Keuangan</h3>
+            <div className="flex gap-1 p-1 bg-slate-100 rounded-xl">
+              {GROUPING_OPTIONS.map(g => (
+                <button
+                  key={g.value}
+                  onClick={() => setGrouping(g.value)}
+                  className={`px-3 py-1 rounded-lg text-xs sm:text-sm font-medium transition-colors ${grouping === g.value ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                >
+                  {g.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p className="text-xs text-slate-400 -mt-2 mb-4">
+            {grouping === 'daily' ? '14 hari terakhir' : grouping === 'monthly' ? '12 bulan terakhir' : 'Per tahun'}
+          </p>
+          <div className="h-64 sm:h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart
-                data={chartData}
-                margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
-              >
+              <BarChart data={chartData} margin={{ top: 5, right: 8, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E2E8F0" />
-                <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{fill: '#64748B'}} />
-                <YAxis axisLine={false} tickLine={false} tick={{fill: '#64748B'}} tickFormatter={(value) => `Rp ${value/1000000}jt`} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #E2E8F0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                  formatter={(value: number) => [`Rp ${value.toLocaleString()}`, '']}
+                <XAxis dataKey="label" axisLine={false} tickLine={false} tick={{ fill: '#64748B', fontSize: 11 }} interval="preserveStartEnd" minTickGap={8} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fill: '#64748B', fontSize: 11 }} width={56} tickFormatter={(value) => formatCompact(Number(value))} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #E2E8F0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)', fontSize: 13 }}
+                  formatter={(value: number, name: string) => [formatRp(Number(value)), name]}
+                  cursor={{ fill: '#F1F5F9' }}
                 />
-                <Bar dataKey="income" name="Pemasukan" fill="#4F46E5" radius={[4, 4, 0, 0]} barSize={20} />
-                <Bar dataKey="expense" name="Pengeluaran" fill="#EF4444" radius={[4, 4, 0, 0]} barSize={20} />
+                <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
+                <Bar dataKey="income" name="Pemasukan" fill="#4F46E5" radius={[4, 4, 0, 0]} maxBarSize={24} />
+                <Bar dataKey="expense" name="Pengeluaran" fill="#EF4444" radius={[4, 4, 0, 0]} maxBarSize={24} />
               </BarChart>
             </ResponsiveContainer>
           </div>

@@ -3,9 +3,11 @@ import { createPortal } from "react-dom";
 import { Download, TrendingUp, TrendingDown, DollarSign, Plus, X, Pencil, Trash2 } from "lucide-react";
 import { Transaction } from "@/types";
 import { useAuth } from "@/context/AuthContext";
+import { type Period, PERIOD_OPTIONS, periodRange, inRange, parseDate } from "@/lib/period";
 
 export function Finance() {
   const { role, user } = useAuth();
+  const [period, setPeriod] = useState<Period>('all');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -112,23 +114,30 @@ export function Finance() {
 
   // Ekspor riwayat transaksi ke CSV (bisa dibuka di Excel)
   const handleDownloadReport = () => {
-    if (transactions.length === 0) return;
+    if (visibleTransactions.length === 0) return;
     const rows = [
       ["Tanggal", "Jenis", "Kategori", "Keterangan", "Jumlah"],
-      ...transactions.map(t => [t.date, t.type === 'income' ? 'Pemasukan' : 'Pengeluaran', t.category, t.description, String(t.type === 'income' ? t.amount : -t.amount)]),
+      ...visibleTransactions.map(t => [t.date, t.type === 'income' ? 'Pemasukan' : 'Pengeluaran', t.category, t.description, String(t.type === 'income' ? t.amount : -t.amount)]),
     ];
     const csv = rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(",")).join("\n");
     const url = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: 'text/csv;charset=utf-8;' }));
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Laporan_Kas_${user?.rtId || 'RT'}_${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `Laporan_Kas_${user?.rtId || 'RT'}_${period}_${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
-  const totalIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
-  const totalExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0);
-  const balance = totalIncome - totalExpense;
+  // Saldo selalu dari seluruh transaksi; pemasukan/pengeluaran & tabel mengikuti filter periode
+  const sum = (rows: Transaction[], type: 'income' | 'expense') => rows.filter(t => t.type === type).reduce((s, t) => s + t.amount, 0);
+  const balance = sum(transactions, 'income') - sum(transactions, 'expense');
+  const range = periodRange(period);
+  const visibleTransactions = transactions
+    .filter(t => inRange(t.date, range))
+    .sort((a, b) => (parseDate(b.date)?.getTime() || 0) - (parseDate(a.date)?.getTime() || 0) || Number(b.id) - Number(a.id));
+  const totalIncome = sum(visibleTransactions, 'income');
+  const totalExpense = sum(visibleTransactions, 'expense');
+  const periodLabel = PERIOD_OPTIONS.find(p => p.value === period)?.label;
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(amount);
@@ -136,12 +145,12 @@ export function Finance() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-2xl font-bold text-slate-800">Keuangan</h2>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <h2 className="text-xl sm:text-2xl font-bold text-slate-800">Keuangan</h2>
         <div className="flex gap-2">
-          <button 
+          <button
             onClick={handleDownloadReport}
-            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
+            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors"
           >
             <Download size={18} />
             Unduh Laporan
@@ -149,7 +158,7 @@ export function Finance() {
           {role === 'admin' && (
             <button
               onClick={openCreate}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-200"
+              className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-200"
             >
               <Plus size={18} />
               Tambah Transaksi
@@ -158,44 +167,87 @@ export function Finance() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-indigo-600 rounded-xl p-6 text-white shadow-lg shadow-indigo-200">
+      {/* Filter periode */}
+      <div className="flex gap-1 p-1 bg-white border border-slate-200 rounded-xl overflow-x-auto max-w-full w-fit">
+        {PERIOD_OPTIONS.map(p => (
+          <button
+            key={p.value}
+            onClick={() => setPeriod(p.value)}
+            className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium whitespace-nowrap transition-colors ${period === p.value ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-50'}`}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+        <div className="bg-indigo-600 rounded-xl p-5 sm:p-6 text-white shadow-lg shadow-indigo-200 sm:col-span-2 lg:col-span-1 min-w-0">
           <div className="flex items-center justify-between mb-4">
             <div className="p-2 bg-white/20 rounded-lg">
               <DollarSign size={24} className="text-white" />
             </div>
-            <span className="text-xs font-medium bg-white/20 px-2 py-1 rounded">Total</span>
+            <span className="text-xs font-medium bg-white/20 px-2 py-1 rounded">Keseluruhan</span>
           </div>
-          <p className="text-indigo-100 text-sm">Saldo Akhir</p>
-          <h3 className="text-3xl font-bold mt-1">{formatCurrency(balance)}</h3>
+          <p className="text-indigo-100 text-sm">Saldo Kas</p>
+          <h3 className="text-2xl sm:text-3xl font-bold mt-1 break-words">{formatCurrency(balance)}</h3>
         </div>
 
-        <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
+        <div className="bg-white rounded-xl p-5 sm:p-6 border border-slate-200 shadow-sm min-w-0">
           <div className="flex items-center justify-between mb-4">
             <div className="p-2 bg-green-50 rounded-lg">
               <TrendingUp size={24} className="text-green-600" />
             </div>
+            <span className="text-xs font-medium text-slate-500 bg-slate-100 px-2 py-1 rounded">{periodLabel}</span>
           </div>
-          <p className="text-slate-500 text-sm">Pemasukan Total</p>
-          <h3 className="text-3xl font-bold text-slate-800 mt-1">{formatCurrency(totalIncome)}</h3>
+          <p className="text-slate-500 text-sm">Pemasukan</p>
+          <h3 className="text-2xl sm:text-3xl font-bold text-slate-800 mt-1 break-words">{formatCurrency(totalIncome)}</h3>
         </div>
 
-        <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
+        <div className="bg-white rounded-xl p-5 sm:p-6 border border-slate-200 shadow-sm min-w-0">
           <div className="flex items-center justify-between mb-4">
             <div className="p-2 bg-red-50 rounded-lg">
               <TrendingDown size={24} className="text-red-600" />
             </div>
+            <span className="text-xs font-medium text-slate-500 bg-slate-100 px-2 py-1 rounded">{periodLabel}</span>
           </div>
-          <p className="text-slate-500 text-sm">Pengeluaran Total</p>
-          <h3 className="text-3xl font-bold text-slate-800 mt-1">{formatCurrency(totalExpense)}</h3>
+          <p className="text-slate-500 text-sm">Pengeluaran</p>
+          <h3 className="text-2xl sm:text-3xl font-bold text-slate-800 mt-1 break-words">{formatCurrency(totalExpense)}</h3>
         </div>
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-200">
+        <div className="px-4 sm:px-6 py-4 border-b border-slate-200 flex items-center justify-between gap-2">
           <h3 className="font-semibold text-slate-800">Riwayat Transaksi</h3>
+          <span className="text-xs text-slate-500">{visibleTransactions.length} transaksi</span>
         </div>
-        <div className="overflow-x-auto">
+
+        {/* Tampilan HP: daftar kartu */}
+        <div className="md:hidden divide-y divide-slate-100">
+          {visibleTransactions.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setSelectedTransaction(t)}
+              className="w-full text-left px-4 py-3 flex items-start justify-between gap-3 hover:bg-slate-50 active:bg-slate-100"
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-slate-900 break-words">{t.description}</p>
+                <div className="flex flex-wrap items-center gap-2 mt-1">
+                  <span className="text-xs text-slate-500">{t.date}</span>
+                  <span className={`inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium ${t.type === 'income' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>{t.category}</span>
+                </div>
+              </div>
+              <span className={`text-sm font-semibold font-mono whitespace-nowrap ${t.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+                {t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
+              </span>
+            </button>
+          ))}
+          {visibleTransactions.length === 0 && (
+            <p className="px-4 py-8 text-center text-sm text-slate-500">Belum ada transaksi pada periode ini.</p>
+          )}
+        </div>
+
+        {/* Tampilan tablet/desktop: tabel */}
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
@@ -206,13 +258,13 @@ export function Finance() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {transactions.map((transaction) => (
+              {visibleTransactions.map((transaction) => (
                 <tr 
                   key={transaction.id} 
                   onClick={() => setSelectedTransaction(transaction)}
                   className="hover:bg-slate-50 transition-colors cursor-pointer"
                 >
-                  <td className="px-6 py-4 text-slate-500">{transaction.date}</td>
+                  <td className="px-6 py-4 text-slate-500 whitespace-nowrap">{transaction.date}</td>
                   <td className="px-6 py-4 font-medium text-slate-900">{transaction.description}</td>
                   <td className="px-6 py-4 text-slate-500">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
@@ -221,17 +273,17 @@ export function Finance() {
                       {transaction.category}
                     </span>
                   </td>
-                  <td className={`px-6 py-4 text-right font-mono ${
+                  <td className={`px-6 py-4 text-right font-mono whitespace-nowrap ${
                     transaction.type === 'income' ? 'text-green-600' : 'text-red-600'
                   }`}>
                     {transaction.type === 'income' ? '+' : '-'}{formatCurrency(transaction.amount)}
                   </td>
                 </tr>
               ))}
-              {transactions.length === 0 && (
+              {visibleTransactions.length === 0 && (
                 <tr>
                   <td colSpan={4} className="px-6 py-8 text-center text-slate-500">
-                    Belum ada transaksi.
+                    Belum ada transaksi pada periode ini.
                   </td>
                 </tr>
               )}

@@ -4,14 +4,12 @@ import {
   Wallet, 
   FileText, 
   Bell, 
-  Settings, 
-  LogOut,
+  Settings,
   Menu,
   X,
-  AlertCircle,
-  UserCircle
+  AlertCircle
 } from "lucide-react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
@@ -19,9 +17,8 @@ import { useAuth } from "@/context/AuthContext";
 
 export function Sidebar() {
   const location = useLocation();
-  const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
-  const { role, isSuperAdmin, user, rtId, logout } = useAuth();
+  const { role, isSuperAdmin, user, rtId } = useAuth();
 
   const menuItems = [
     { icon: LayoutDashboard, label: "Dashboard", path: "/", roles: ['admin', 'resident'] },
@@ -30,13 +27,7 @@ export function Sidebar() {
     { icon: FileText, label: "Surat Pengantar", path: "/letters", roles: ['admin', 'resident'] },
     { icon: Bell, label: "Pengumuman", path: "/announcements", roles: ['admin', 'resident'] },
     { icon: AlertCircle, label: "Laporan Warga", path: "/reports", roles: ['admin', 'resident'] },
-    { icon: UserCircle, label: "Profil Saya", path: "/profile", roles: ['admin', 'resident'] },
   ];
-
-  const handleLogout = () => {
-    logout();
-    navigate('/login');
-  };
 
   return (
     <>
@@ -105,21 +96,23 @@ export function Sidebar() {
             })}
           </nav>
 
-          <div className="p-4 border-t border-white/10">
-            {isSuperAdmin && (
-              <Link to="/settings" className="flex items-center gap-3 px-4 py-3 w-full rounded-xl text-sm font-medium text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-200">
-                <Settings size={18} />
+          {isSuperAdmin && (
+            <div className="p-4 border-t border-white/10">
+              <Link
+                to="/settings"
+                onClick={() => setIsOpen(false)}
+                className={cn(
+                  "flex items-center gap-3 px-4 py-3 w-full rounded-xl text-sm font-medium transition-all duration-200",
+                  location.pathname === '/settings'
+                    ? "bg-white/10 text-white shadow-sm border border-white/10"
+                    : "text-slate-400 hover:text-white hover:bg-white/5"
+                )}
+              >
+                <Settings size={18} className={location.pathname === '/settings' ? "text-indigo-400" : ""} />
                 Pengaturan
               </Link>
-            )}
-            <button 
-              onClick={handleLogout}
-              className="flex items-center gap-3 px-4 py-3 w-full rounded-xl text-sm font-medium text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-all duration-200 mt-1"
-            >
-              <LogOut size={18} />
-              Keluar
-            </button>
-          </div>
+            </div>
+          )}
         </div>
       </aside>
     </>
