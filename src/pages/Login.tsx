@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { Shield, User, Key, ArrowRight, MapPin, Phone, UserPlus } from 'lucide-react';
+import { Logo, LogoMark } from '@/components/Logo';
 
 export function Login() {
   const [isRegistering, setIsRegistering] = useState(false);
@@ -102,9 +103,7 @@ export function Login() {
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent"></div>
         
         <div className="relative z-10">
-          <div className="w-12 h-12 bg-white/10 backdrop-blur-md rounded-xl flex items-center justify-center border border-white/20 mb-6 shadow-2xl">
-            <Shield className="text-indigo-400" size={24} />
-          </div>
+          <LogoMark size={64} className="mb-6 shadow-2xl shadow-indigo-500/30 rounded-[15px]" />
           <h1 className="text-5xl font-bold text-white tracking-tight leading-tight mb-4">
             Sistem Informasi<br/>Manajemen Warga
           </h1>
@@ -124,6 +123,10 @@ export function Login() {
       <div className="w-full lg:w-1/2 flex items-center justify-center p-8 sm:p-12 bg-white relative">
         <div className="w-full max-w-md space-y-8">
           <div className="text-center lg:text-left">
+            {/* Di HP panel kiri tersembunyi, jadi logo tampil di atas form */}
+            <div className="flex justify-center lg:hidden mb-6">
+              <Logo size={44} />
+            </div>
             <h2 className="text-3xl font-bold text-slate-900 tracking-tight">
               {isRegistering ? 'Daftar Warga Baru' : 'Selamat Datang'}
             </h2>

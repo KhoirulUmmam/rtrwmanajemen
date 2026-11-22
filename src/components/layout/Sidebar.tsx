@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { useAuth } from "@/context/AuthContext";
+import { Logo } from "@/components/Logo";
 
 export function Sidebar() {
   const location = useLocation();
@@ -59,13 +60,7 @@ export function Sidebar() {
       )}>
         <div className="flex flex-col h-full">
           <div className="p-6 border-b border-white/10">
-            <h1 className="text-xl font-bold tracking-tight flex items-center gap-3 text-white">
-              <div className="w-8 h-8 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-500/20">
-                <span className="text-white font-bold text-sm">RT</span>
-              </div>
-              Sistem {rtId || 'RW 05'}
-            </h1>
-            <p className="text-[11px] font-mono text-slate-500 mt-2 ml-11 uppercase tracking-wider">Kelurahan Sukamaju</p>
+            <Logo size={36} tone="light" subtitle={rtId && rtId !== 'SUPERADMIN' ? rtId : 'Semua RT'} />
             {role && user && (
               <div className="mt-6 p-3 bg-white/5 rounded-xl border border-white/10 backdrop-blur-sm">
                 <p className="text-[10px] font-mono text-slate-400 uppercase tracking-wider mb-1">Login sebagai:</p>
