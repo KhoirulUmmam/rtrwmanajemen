@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Plus, Search, Filter, AlertCircle, CheckCircle, Clock, X, FileText, User, MessageSquare } from "lucide-react";
+import { Plus, Search, Filter, AlertCircle, CheckCircle, Clock, X, FileText, User, MessageSquare, Trash2 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -27,6 +27,9 @@ export function Reports() {
   // Form State
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [note, setNote] = useState("");
+  const [notice, setNotice] = useState("");
+  const [formError, setFormError] = useState("");
 
   useEffect(() => {
     fetchReports();
@@ -39,40 +42,8 @@ export function Reports() {
       const data = await response.json();
       
       if (Array.isArray(data)) {
-        // Filter data based on the logged-in user's RT code
-        const filteredData = user?.rtId 
-          ? data.filter((report: Report) => {
-              // Assuming the report object has an 'rt' property or we can derive it.
-              // If the report doesn't have an RT property directly, we might need to fetch residents to cross-reference,
-              // but for now, let's assume the backend or the data structure includes it, or we filter by residentId if we know the resident's RT.
-              // Since we don't have 'rt' in the Report interface, we'll need to rely on the backend to filter, OR
-              // we can just show all reports for now if we can't filter here.
-              // Let's add a check if the report has an 'rt' property (even if not in interface)
-              const reportRt = (report as any).rt;
-              if (reportRt) {
-                return String(reportRt).toUpperCase() === String(user.rtId).toUpperCase();
-              }
-              return true; // If no RT info on report, show it (fallback)
-            })
-          : data;
-
-        if (role === 'resident' && user) {
-          setReports(filteredData.filter((r: Report) => {
-            const reportResidentId = String(r.residentId);
-            const userId = String(user.id);
-            const userNik = user.nik ? String(user.nik) : '';
-            
-            // Check if report belongs to user by ID (web) or NIK (wa) or Phone (wa fallback)
-            const userPhones = user.phone ? String(user.phone).split(',').map(p => p.trim().replace(/\D/g, '')) : [];
-            const cleanReportId = reportResidentId.replace(/\D/g, '');
-            
-            return reportResidentId === userId || 
-                   (userNik && reportResidentId === userNik) ||
-                   (cleanReportId.length > 5 && userPhones.some(p => p.includes(cleanReportId) || cleanReportId.includes(p)));
-          }));
-        } else {
-          setReports(filteredData.reverse());
-        }
+        // Server sudah membatasi: pengurus melihat laporan RT-nya, warga hanya laporannya sendiri
+        setReports(data);
       } else {
         console.error("Data is not an array:", data);
         setReports([]);
@@ -88,31 +59,23 @@ export function Reports() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
-
-    const newReport = {
-      residentId: user.id,
-      residentName: user.name, // Ensure residentName is sent
-      title,
-      description,
-      date: new Date().toISOString().split('T')[0],
-      rt: user.rtId || "", // Include RT code for filtering
-    };
-
+    setFormError("");
     try {
       const response = await fetch('/api/reports', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newReport),
+        body: JSON.stringify({ title, description }),
       });
-
       if (response.ok) {
         fetchReports();
         setIsAddModalOpen(false);
         setTitle("");
         setDescription("");
+      } else {
+        setFormError((await response.json().catch(() => ({}))).error || "Gagal mengirim laporan.");
       }
     } catch (error) {
-      console.error("Failed to submit report:", error);
+      setFormError("Terjadi kesalahan koneksi.");
     }
   };
 
@@ -121,23 +84,41 @@ export function Reports() {
       const response = await fetch(`/api/reports/${id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ status: newStatus, note }),
       });
-
+      const data = await response.json().catch(() => ({}));
       if (response.ok) {
         fetchReports();
-        if (selectedReport) {
-          setSelectedReport({ ...selectedReport, status: newStatus });
-        }
+        if (selectedReport) setSelectedReport({ ...selectedReport, status: newStatus });
+        setNote("");
+        if (data.whatsapp?.ok) setNotice("Status diperbarui dan pelapor diberi tahu lewat WhatsApp.");
+        else if (data.whatsapp) setNotice(`Status diperbarui, tetapi WhatsApp gagal: ${data.whatsapp.reason}`);
+        else setNotice("Status diperbarui.");
+        setTimeout(() => setNotice(""), 5000);
+      } else {
+        alert(data.error || "Gagal mengubah status.");
       }
     } catch (error) {
       console.error("Failed to update status:", error);
     }
   };
 
+  const handleDelete = async (report: Report) => {
+    if (!confirm("Hapus laporan ini?")) return;
+    const response = await fetch(`/api/reports/${report.id}`, { method: 'DELETE' });
+    if (response.ok) {
+      setReports(prev => prev.filter(r => r.id !== report.id));
+      setIsDetailModalOpen(false);
+    } else {
+      alert((await response.json().catch(() => ({}))).error || "Gagal menghapus laporan.");
+    }
+  };
+
   const filteredReports = reports.filter(report => {
-    const matchesSearch = report.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          report.residentName.toLowerCase().includes(searchTerm.toLowerCase());
+    const q = searchTerm.toLowerCase();
+    const matchesSearch = String(report.title).toLowerCase().includes(q) ||
+                          String(report.residentName).toLowerCase().includes(q) ||
+                          String(report.description).toLowerCase().includes(q);
     const matchesStatus = filterStatus === "Semua" || report.status === filterStatus;
     return matchesSearch && matchesStatus;
   });
@@ -169,10 +150,20 @@ export function Reports() {
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Laporan Warga</h1>
           <p className="text-slate-500 text-sm mt-1">
-            {role === 'admin' ? 'Kelola laporan dan keluhan dari warga (via WhatsApp)' : 'Daftar laporan yang Anda sampaikan via WhatsApp'}
+            {role === 'admin' ? 'Kelola laporan dan keluhan dari warga (web & WhatsApp)' : 'Laporan yang Anda kirim lewat web atau WhatsApp (ketik LAPOR ... ke nomor bot)'}
           </p>
         </div>
+        {role === 'resident' && (
+          <button
+            onClick={() => { setFormError(""); setIsAddModalOpen(true); }}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-200"
+          >
+            <Plus size={18} /> Buat Laporan
+          </button>
+        )}
       </div>
+
+      {notice && <div className="p-4 bg-green-50 border border-green-100 rounded-xl text-sm text-green-700">{notice}</div>}
 
       <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col sm:flex-row gap-4">
         <div className="relative flex-1">
@@ -261,7 +252,32 @@ export function Reports() {
         )}
       </div>
 
-      {/* Add Report Modal Removed */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden">
+            <div className="flex justify-between items-center p-6 border-b border-slate-100">
+              <h2 className="text-xl font-bold text-slate-800">Buat Laporan</h2>
+              <button onClick={() => setIsAddModalOpen(false)} className="text-slate-400 hover:text-slate-600"><X size={24} /></button>
+            </div>
+            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+              {formError && <div className="p-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600">{formError}</div>}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">Judul</label>
+                <input required value={title} onChange={e => setTitle(e.target.value)} placeholder="Contoh: Lampu jalan mati" className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">Detail laporan</label>
+                <textarea required rows={4} value={description} onChange={e => setDescription(e.target.value)} placeholder="Jelaskan lokasi dan masalahnya..." className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+              </div>
+              <p className="text-xs text-slate-400">Ingin melampirkan foto? Kirim lewat WhatsApp bot RT dengan caption <strong>LAPOR ...</strong></p>
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => setIsAddModalOpen(false)} className="px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 rounded-lg">Batal</button>
+                <button type="submit" className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700">Kirim Laporan</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Detail Modal */}
       <AnimatePresence>
@@ -312,9 +328,25 @@ export function Reports() {
                     </div>
                   </div>
 
+                  {selectedReport.image && /^https?:\/\//.test(selectedReport.image) && (
+                    <div>
+                      <h4 className="text-sm font-medium text-slate-700 mb-2">Foto Lampiran:</h4>
+                      <a href={selectedReport.image} target="_blank" rel="noopener noreferrer">
+                        <img src={selectedReport.image} alt="Foto laporan" className="w-full max-h-80 object-contain rounded-xl border border-slate-100 bg-slate-50" />
+                      </a>
+                    </div>
+                  )}
+
                   {role === 'admin' && (
                     <div className="pt-6 border-t border-slate-100">
-                      <h4 className="text-sm font-medium text-slate-700 mb-3">Update Status Laporan</h4>
+                      <h4 className="text-sm font-medium text-slate-700 mb-3">Update Status Laporan <span className="font-normal text-slate-400">(pelapor diberi tahu lewat WhatsApp)</span></h4>
+                      <textarea
+                        value={note}
+                        onChange={e => setNote(e.target.value)}
+                        rows={2}
+                        placeholder="Catatan untuk pelapor (opsional), mis. 'Sudah diperbaiki petugas PLN'"
+                        className="w-full mb-3 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
                       <div className="flex flex-wrap gap-2">
                         {['Menunggu', 'Diproses', 'Selesai', 'Ditolak'].map((status) => (
                           <button
@@ -330,6 +362,9 @@ export function Reports() {
                           </button>
                         ))}
                       </div>
+                      <button onClick={() => handleDelete(selectedReport)} className="mt-6 flex items-center gap-1.5 text-sm font-medium text-red-600 hover:text-red-700">
+                        <Trash2 size={16} /> Hapus laporan
+                      </button>
                     </div>
                   )}
                 </div>

@@ -14,54 +14,47 @@ export function Login() {
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const { login } = useAuth();
+  const { setSession } = useAuth();
   const navigate = useNavigate();
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setSuccessMsg('');
-    setIsLoading(true);
 
     if (!rtCode.trim() || !nik.trim() || !name.trim() || !phone.trim() || !password.trim()) {
       setError('Semua kolom harus diisi.');
-      setIsLoading(false);
+      return;
+    }
+    if (!/^\d{16}$/.test(nik.trim())) {
+      setError('NIK harus 16 digit angka.');
+      return;
+    }
+    if (password.length < 6) {
+      setError('Password minimal 6 karakter.');
       return;
     }
 
+    setIsLoading(true);
     try {
-      const newResident = {
-        nik,
-        name,
-        phone,
-        password,
-        rt: rtCode.toUpperCase(),
-        status: 'Tetap', // Changed from 'Aktif' to 'Tetap' to match the standard status in Residents.tsx
-        familyCardNumber: '',
-        address: '',
-        rw: '05',
-        gender: 'Laki-laki', // Add default gender
-        maritalStatus: 'Lajang', // Add default marital status
-        familyRelationship: 'Kepala Keluarga' // Add default relationship
-      };
-
-      const res = await fetch('/api/residents', {
+      const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newResident)
+        body: JSON.stringify({ rtCode, nik: nik.trim(), name, phone, password }),
       });
+      const data = await res.json().catch(() => ({}));
 
       if (res.ok) {
-        setSuccessMsg('Pendaftaran berhasil! Silakan masuk menggunakan NIK Anda.');
+        setSuccessMsg(data.message || 'Pendaftaran berhasil. Akun aktif setelah diverifikasi pengurus RT.');
         setIsRegistering(false);
-        // Reset form fields except rtCode and nik to make login easier
         setName('');
         setPhone('');
+        setPassword('');
       } else {
-        setError('Gagal mendaftar. Silakan coba lagi.');
+        setError(data.error || 'Gagal mendaftar. Silakan coba lagi.');
       }
     } catch (err) {
-      setError('Terjadi kesalahan saat mendaftar.');
+      setError('Terjadi kesalahan saat mendaftar. Periksa koneksi Anda.');
     } finally {
       setIsLoading(false);
     }
@@ -71,68 +64,27 @@ export function Login() {
     e.preventDefault();
     setError('');
     setSuccessMsg('');
-    setIsLoading(true);
 
     if (!rtCode.trim()) {
       setError('Kode RT harus diisi.');
-      setIsLoading(false);
       return;
     }
 
+    setIsLoading(true);
     try {
-      // Super Admin Backdoor (Check this FIRST before any API calls)
-      if (loginType === 'admin' && rtCode.trim().toUpperCase() === 'SUPERADMIN' && password === 'admin123') {
-          console.log("Super Admin Login Detected");
-          login('admin', { name: 'Super Administrator', rtId: 'SUPERADMIN' }, 'SUPERADMIN');
-          navigate('/');
-          return;
-      }
+      // Pengecekan password dilakukan di server; browser tidak pernah menerima data password
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: loginType, rtCode, nik: nik.trim(), password }),
+      });
+      const data = await res.json().catch(() => ({}));
 
-      if (loginType === 'admin') {
-        // Strict Admin login using Admins sheet
-        const res = await fetch('/api/admins');
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data)) {
-            const admin = data.find((a: any) => String(a.rtCode).toUpperCase() === rtCode.toUpperCase() && String(a.password) === password);
-            
-            if (admin) {
-              login('admin', { name: admin.name || `Pengurus ${rtCode.toUpperCase()}`, rtId: rtCode.toUpperCase() }, rtCode.toUpperCase());
-              navigate('/');
-            } else {
-              setError('Kode RT atau Password admin salah.');
-            }
-          } else {
-            console.error("Invalid data from GAS:", data);
-            setError('Sistem belum dikonfigurasi dengan benar (Sheet Admins tidak ditemukan/Error). Pastikan Google Apps Script sudah diupdate.');
-          }
-        } else {
-          setError('Gagal mengambil data admin dari server.');
-        }
+      if (res.ok && data.token) {
+        setSession(data.token, data.user);
+        navigate('/');
       } else {
-        // Resident login using NIK and Password
-        // Add a timestamp to bypass cache if needed, or rely on the server's cache invalidation
-        const res = await fetch(`/api/residents?t=${new Date().getTime()}`);
-        const residents = await res.json();
-        
-        if (Array.isArray(residents)) {
-          // Filter by RT first, then check NIK and password
-          const resident = residents.find((r: any) => 
-            String(r.rt).toUpperCase() === rtCode.toUpperCase() &&
-            String(r.nik) === String(nik) && 
-            String(r.password) === String(password)
-          );
-          
-          if (resident) {
-            login('resident', { ...resident, rtId: rtCode.toUpperCase() }, rtCode.toUpperCase());
-            navigate('/');
-          } else {
-            setError('NIK, Password, atau Kode RT salah.');
-          }
-        } else {
-           console.error("Invalid residents data:", residents);
-           setError('Gagal mengambil data warga dari server.');
-        }
+        setError(data.error || 'Login gagal. Periksa kembali data Anda.');
       }
     } catch (err) {
       console.error("Login error:", err);

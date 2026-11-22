@@ -2,6 +2,8 @@ import { Database, HardDrive, Save, RefreshCw, Trash2, Upload, Cloud, Smartphone
 import { useEffect, useState, useRef } from "react";
 import { useAuth } from "@/context/AuthContext";
 import React from "react";
+import { AdminManager } from "@/components/settings/AdminManager";
+import { BroadcastCard } from "@/components/settings/BroadcastCard";
 
 interface DbStatus {
   status: string;
@@ -18,8 +20,8 @@ export function Settings() {
   const [loading, setLoading] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
   const [savingVps, setSavingVps] = useState(false);
-  const [waStatus, setWaStatus] = useState<{ status: string; qr: string | null; message?: string }>({ status: 'close', qr: null });
-  const { role } = useAuth();
+  const [waStatus, setWaStatus] = useState<{ status: string; qr: string | null; message?: string; number?: string | null }>({ status: 'close', qr: null });
+  const { role, isSuperAdmin } = useAuth();
 
   const fetchStatus = async () => {
     setLoading(true);
@@ -52,13 +54,15 @@ export function Settings() {
 
   const fetchConfig = async () => {
     try {
-      const res = await fetch('/api/script-url');
-      const data = await res.json();
-      setScriptUrl(data.url);
-      
+      if (isSuperAdmin) {
+        const res = await fetch('/api/script-url');
+        const data = await res.json();
+        setScriptUrl(data.url || '');
+      }
+
       const vpsRes = await fetch('/api/vps-url');
       const vpsData = await vpsRes.json();
-      setVpsUrl(vpsData.url);
+      setVpsUrl(vpsData.url || '');
     } catch (error) {
       console.error("Failed to fetch config URLs", error);
     }
@@ -196,6 +200,9 @@ export function Settings() {
         </div>
       </div>
 
+      {isSuperAdmin && <AdminManager />}
+
+      {isSuperAdmin && (
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
         <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
           <Cloud className="text-indigo-600" size={24} />
@@ -226,6 +233,7 @@ export function Settings() {
           </button>
         </form>
       </div>
+      )}
 
       {role === 'admin' && (
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
@@ -255,6 +263,13 @@ export function Settings() {
                 <div className="text-center py-4">
                   <CheckCircle className="mx-auto text-green-500 mb-2" size={48} />
                   <p className="text-sm text-slate-600 font-medium">Bot WhatsApp aktif dan siap menerima pesan.</p>
+                  {waStatus.number && (
+                    <p className="mt-2 text-sm text-slate-500">
+                      Nomor bot: <span className="font-mono font-semibold text-slate-800">+{waStatus.number}</span>
+                      <br />
+                      <span className="text-xs">Warga cukup kirim <strong>MENU</strong> ke nomor ini.</span>
+                    </p>
+                  )}
                 </div>
               ) : waStatus.qr ? (
                 <div className="text-center">
@@ -282,6 +297,7 @@ export function Settings() {
             </div>
             
             <div className="space-y-4">
+              {isSuperAdmin && (
               <form onSubmit={handleSaveVpsConfig} className="bg-slate-50 p-4 rounded-lg border border-slate-200">
                 <label className="block text-sm font-medium text-slate-700 mb-1">URL API VPS WhatsApp</label>
                 <div className="flex gap-2">
@@ -304,6 +320,7 @@ export function Settings() {
                   Masukkan IP dan Port VPS tempat bot WhatsApp berjalan.
                 </p>
               </form>
+              )}
 
               <p className="text-sm text-slate-600 mb-4">
                 Bot WhatsApp memungkinkan warga untuk mengirim laporan dan mengecek status langsung melalui WhatsApp.
@@ -334,13 +351,14 @@ export function Settings() {
               <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
                 <h4 className="text-sm font-semibold text-blue-800 mb-1">Penting untuk Vercel:</h4>
                 <p className="text-xs text-blue-700">
-                  Pengaturan ini hanya tersimpan sementara. Untuk permanen, Anda <strong>wajib</strong> menambahkan variabel <code>VITE_VPS_URL</code> di menu Environment Variables pada dashboard Vercel Anda.
+                  Pengaturan ini hanya tersimpan sementara. Untuk permanen, Anda <strong>wajib</strong> menambahkan variabel <code>VPS_WHATSAPP_URL</code>, <code>VPS_API_KEY</code>, dan <code>WEBHOOK_SECRET</code> di menu Environment Variables pada dashboard Vercel Anda.
                 </p>
               </div>
             </div>
           </div>
         </div>
       )}
+      {role === 'admin' && <BroadcastCard disabled={waStatus.status !== 'open'} />}
     </div>
   );
 }

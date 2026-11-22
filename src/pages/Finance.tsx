@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Download, TrendingUp, TrendingDown, DollarSign, Plus, X } from "lucide-react";
+import { Download, TrendingUp, TrendingDown, DollarSign, Plus, X, Pencil, Trash2 } from "lucide-react";
 import { Transaction } from "@/types";
 import { useAuth } from "@/context/AuthContext";
 
@@ -10,6 +10,8 @@ export function Finance() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [formError, setFormError] = useState("");
   const [formData, setFormData] = useState({
     type: 'income',
     amount: '',
@@ -24,16 +26,8 @@ export function Finance() {
       if (!response.ok) throw new Error('Network response was not ok');
       const data = await response.json();
       if (Array.isArray(data)) {
-        // Filter transactions based on RT if possible
-        const filteredTransactions = user?.rtId 
-          ? data.filter((transaction: any) => {
-              if (transaction.rt) {
-                return String(transaction.rt).toUpperCase() === String(user.rtId).toUpperCase();
-              }
-              return true; // Fallback if no RT info
-            })
-          : data;
-        setTransactions(filteredTransactions);
+        // Data sudah dibatasi per RT oleh server
+        setTransactions(data.map((t: any) => ({ ...t, amount: Number(t.amount) || 0 })));
       } else {
         console.error("Data is not an array:", data);
         setTransactions([]);
@@ -48,44 +42,88 @@ export function Finance() {
     fetchTransactions();
   }, []);
 
+  const emptyForm = () => ({
+    type: 'income',
+    amount: '',
+    date: new Date().toISOString().split('T')[0],
+    description: '',
+    category: 'Iuran Warga'
+  });
+
+  const openCreate = () => {
+    setEditingId(null);
+    setFormData(emptyForm());
+    setFormError("");
+    setIsModalOpen(true);
+  };
+
+  const openEdit = (t: Transaction) => {
+    setEditingId(t.id);
+    setFormData({
+      type: t.type,
+      amount: Number(t.amount).toLocaleString('id-ID'),
+      date: String(t.date).slice(0, 10),
+      description: t.description,
+      category: t.category,
+    });
+    setFormError("");
+    setSelectedTransaction(null);
+    setIsModalOpen(true);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("Submitting transaction...");
     if (isSubmitting) return;
     setIsSubmitting(true);
+    setFormError("");
     try {
-      const payload = {
-        ...formData,
-        amount: parseInt(formData.amount.replace(/\D/g, '')) || 0,
-        rt: user?.rtId || "" // Add RT info to new transaction
-      };
-
-      const response = await fetch('/api/transactions', {
-        method: 'POST',
+      const payload = { ...formData, amount: parseInt(formData.amount.replace(/\D/g, '')) || 0 };
+      const response = await fetch(editingId ? `/api/transactions/${editingId}` : '/api/transactions', {
+        method: editingId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
 
       if (response.ok) {
         setIsModalOpen(false);
-        setFormData({
-          type: 'income',
-          amount: '',
-          date: new Date().toISOString().split('T')[0],
-          description: '',
-          category: 'Iuran Warga'
-        });
+        setFormData(emptyForm());
+        setEditingId(null);
         fetchTransactions();
+      } else {
+        setFormError((await response.json().catch(() => ({}))).error || "Gagal menyimpan transaksi.");
       }
     } catch (error) {
-      console.error("Failed to add transaction:", error);
+      setFormError("Terjadi kesalahan koneksi.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const handleDelete = async (t: Transaction) => {
+    if (!confirm(`Hapus transaksi "${t.description}"?`)) return;
+    const response = await fetch(`/api/transactions/${t.id}`, { method: 'DELETE' });
+    if (response.ok) {
+      setSelectedTransaction(null);
+      setTransactions(prev => prev.filter(x => x.id !== t.id));
+    } else {
+      alert((await response.json().catch(() => ({}))).error || "Gagal menghapus transaksi.");
+    }
+  };
+
+  // Ekspor riwayat transaksi ke CSV (bisa dibuka di Excel)
   const handleDownloadReport = () => {
-    window.location.href = '/api/reports/download';
+    if (transactions.length === 0) return;
+    const rows = [
+      ["Tanggal", "Jenis", "Kategori", "Keterangan", "Jumlah"],
+      ...transactions.map(t => [t.date, t.type === 'income' ? 'Pemasukan' : 'Pengeluaran', t.category, t.description, String(t.type === 'income' ? t.amount : -t.amount)]),
+    ];
+    const csv = rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob(["\ufeff" + csv], { type: 'text/csv;charset=utf-8;' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Laporan_Kas_${user?.rtId || 'RT'}_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const totalIncome = transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0);
@@ -109,8 +147,8 @@ export function Finance() {
             Unduh Laporan
           </button>
           {role === 'admin' && (
-            <button 
-              onClick={() => setIsModalOpen(true)}
+            <button
+              onClick={openCreate}
               className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-200"
             >
               <Plus size={18} />
@@ -252,8 +290,18 @@ export function Finance() {
                 </div>
               </div>
 
-              <div className="pt-2 flex justify-end">
-                <button 
+              <div className="pt-2 flex justify-between gap-2">
+                {role === 'admin' ? (
+                  <div className="flex gap-2">
+                    <button onClick={() => openEdit(selectedTransaction)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">
+                      <Pencil size={16} /> Ubah
+                    </button>
+                    <button onClick={() => handleDelete(selectedTransaction)} className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-red-600 rounded-lg hover:bg-red-50">
+                      <Trash2 size={16} /> Hapus
+                    </button>
+                  </div>
+                ) : <span />}
+                <button
                   onClick={() => setSelectedTransaction(null)}
                   className="px-4 py-2 bg-slate-100 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-200 transition-colors"
                 >
@@ -271,7 +319,7 @@ export function Finance() {
         <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-              <h3 className="text-lg font-semibold text-slate-800">Tambah Transaksi</h3>
+              <h3 className="text-lg font-semibold text-slate-800">{editingId ? 'Ubah Transaksi' : 'Tambah Transaksi'}</h3>
               <button 
                 onClick={() => setIsModalOpen(false)}
                 className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-colors"
@@ -281,6 +329,7 @@ export function Finance() {
             </div>
             
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
+              {formError && <div className="p-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600">{formError}</div>}
               <div className="grid grid-cols-2 gap-4">
                 <button
                   type="button"

@@ -1,5 +1,5 @@
 import { Users, FileText, Wallet, ArrowUpRight, ArrowDownRight, Calendar, MapPin, Clock, Heart, User } from 'lucide-react';
-import { financeData, letters, activities } from '@/data/mockData';
+import { Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { Resident, Transaction } from '@/types';
 import { 
@@ -23,36 +23,28 @@ export function Dashboard() {
   const { user } = useAuth();
   const [residents, setResidents] = useState<Resident[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [letters, setLetters] = useState<any[]>([]);
+  const [announcements, setAnnouncements] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [resResidents, resTransactions] = await Promise.all([
+        const [resResidents, resTransactions, resLetters, resAnnouncements] = await Promise.all([
           fetch('/api/residents'),
-          fetch('/api/transactions')
+          fetch('/api/transactions'),
+          fetch('/api/letters'),
+          fetch('/api/announcements'),
         ]);
-        if (!resResidents.ok || !resTransactions.ok) throw new Error('Network response was not ok');
-        const dataResidents = await resResidents.json();
-        const dataTransactions = await resTransactions.json();
-        
-        if (Array.isArray(dataResidents)) {
-          const filteredResidents = user?.rtId
-            ? dataResidents.filter((r: Resident) => String(r.rt).toUpperCase() === String(user.rtId).toUpperCase())
-            : dataResidents;
-          setResidents(filteredResidents);
-        }
-        if (Array.isArray(dataTransactions)) {
-          const filteredTransactions = user?.rtId
-            ? dataTransactions.filter((t: any) => {
-                if (t.rt) {
-                  return String(t.rt).toUpperCase() === String(user.rtId).toUpperCase();
-                }
-                return true;
-              })
-            : dataTransactions;
-          setTransactions(filteredTransactions);
-        }
+        // Server sudah membatasi data sesuai RT & peran user
+        const asArray = async (res: Response) => {
+          const data = await res.json().catch(() => []);
+          return res.ok && Array.isArray(data) ? data : [];
+        };
+        setResidents((await asArray(resResidents)).filter((r: any) => !['Pindah', 'Meninggal'].includes(r.status) && r.verified !== 'pending'));
+        setTransactions((await asArray(resTransactions)).map((t: any) => ({ ...t, amount: Number(t.amount) || 0 })));
+        setLetters(await asArray(resLetters));
+        setAnnouncements((await asArray(resAnnouncements)).slice(0, 3));
       } catch (error) {
         console.error("Failed to fetch data:", error);
       } finally {
@@ -63,12 +55,11 @@ export function Dashboard() {
   }, []);
 
   const totalResidents = residents.length;
-  const pendingLetters = letters.filter(l => l.status === 'Menunggu').length;
+  const pendingLetters = letters.filter(l => l.status === 'Menunggu' || l.status === 'Proses').length;
   const totalIncome = transactions.filter(t => t.type === 'income').reduce((acc, curr) => acc + curr.amount, 0);
   const totalExpense = transactions.filter(t => t.type === 'expense').reduce((acc, curr) => acc + curr.amount, 0);
   
   const processChartData = () => {
-    if (transactions.length === 0) return financeData; // Fallback to mock data if no transactions
 
     const monthlyData: Record<string, { income: number, expense: number }> = {};
     const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Ags', 'Sep', 'Okt', 'Nov', 'Des'];
@@ -196,40 +187,25 @@ export function Dashboard() {
         </div>
       </div>
 
-      {/* Activities Section */}
+      {/* Pengumuman terbaru (data asli) */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60">
         <div className="flex items-center justify-between mb-6">
-          <h3 className="text-lg font-bold text-slate-800 tracking-tight">Kegiatan Berlangsung</h3>
-          <button className="text-sm font-semibold text-indigo-600 hover:text-indigo-700 transition-colors">Lihat Semua &rarr;</button>
+          <h3 className="text-lg font-bold text-slate-800 tracking-tight">Pengumuman Terbaru</h3>
+          <Link to="/announcements" className="text-sm font-semibold text-indigo-600 hover:text-indigo-700 transition-colors">Lihat Semua &rarr;</Link>
         </div>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {activities.map((activity) => (
-            <div key={activity.id} className="p-5 rounded-xl border border-slate-200/60 hover:border-indigo-300 hover:shadow-md transition-all group bg-slate-50/50">
-              <div className="flex justify-between items-start mb-4">
-                <h4 className="font-semibold text-slate-800 group-hover:text-indigo-600 transition-colors">{activity.title}</h4>
-                <span className={`px-2.5 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider ${
-                  activity.status === 'Berlangsung' ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' :
-                  activity.status === 'Akan Datang' ? 'bg-blue-100 text-blue-700 border border-blue-200' :
-                  'bg-slate-200 text-slate-700 border border-slate-300'
-                }`}>
-                  {activity.status}
-                </span>
+          {announcements.length === 0 && (
+            <p className="text-sm text-slate-400 col-span-full">Belum ada pengumuman.</p>
+          )}
+          {announcements.map((a) => (
+            <Link to="/announcements" key={a.id} className="p-5 rounded-xl border border-slate-200/60 hover:border-indigo-300 hover:shadow-md transition-all group bg-slate-50/50">
+              <h4 className="font-semibold text-slate-800 group-hover:text-indigo-600 transition-colors mb-2 line-clamp-1">{a.title}</h4>
+              <div className="flex items-center gap-2 text-xs text-slate-400 mb-3">
+                <Calendar size={14} />
+                <span>{a.date}</span>
               </div>
-              <div className="space-y-2.5 text-sm text-slate-500 font-medium">
-                <div className="flex items-center gap-2.5">
-                  <Calendar size={16} className="text-slate-400" />
-                  <span>{activity.date}</span>
-                </div>
-                <div className="flex items-center gap-2.5">
-                  <Clock size={16} className="text-slate-400" />
-                  <span>{activity.time}</span>
-                </div>
-                <div className="flex items-center gap-2.5">
-                  <MapPin size={16} className="text-slate-400" />
-                  <span className="truncate">{activity.location}</span>
-                </div>
-              </div>
-            </div>
+              <p className="text-sm text-slate-500 line-clamp-3">{a.content}</p>
+            </Link>
           ))}
         </div>
       </div>

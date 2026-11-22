@@ -1,4 +1,4 @@
-import { Search, Plus, Filter, MoreHorizontal, X, CreditCard, Printer, User, FileText, Download } from "lucide-react";
+import { Search, Plus, Filter, X, CreditCard, Printer, User, FileText, Download, Pencil, Trash2, CheckCircle } from "lucide-react";
 import { useState, useEffect } from "react";
 import React from "react";
 import { Resident } from "@/types";
@@ -7,6 +7,12 @@ import { useAuth } from "@/context/AuthContext";
 export function Residents() {
   const { user } = useAuth();
   const [residentsList, setResidentsList] = useState<Resident[]>([]);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [formError, setFormError] = useState("");
+  const [password, setPassword] = useState("");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("Semua");
+  const [showFilter, setShowFilter] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isCardModalOpen, setIsCardModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
@@ -15,12 +21,12 @@ export function Residents() {
   const [familyMembers, setFamilyMembers] = useState<Resident[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formData, setFormData] = useState<Omit<Resident, 'id'>>({
+  const emptyForm = (): Omit<Resident, 'id'> => ({
     name: "",
     nik: "",
     familyCardNumber: "",
     address: "",
-    rt: user?.rtId || "",
+    rt: user?.rtId === 'SUPERADMIN' ? "" : (user?.rtId || ""),
     rw: "05",
     status: "Tetap",
     phone: "",
@@ -28,6 +34,7 @@ export function Residents() {
     maritalStatus: "Lajang",
     familyRelationship: "Kepala Keluarga"
   });
+  const [formData, setFormData] = useState<Omit<Resident, 'id'>>(emptyForm);
 
   const [mutationData, setMutationData] = useState({
     type: 'Pindah',
@@ -42,11 +49,8 @@ export function Residents() {
       if (!response.ok) throw new Error('Network response was not ok');
       const data = await response.json();
       if (Array.isArray(data)) {
-        // Filter data based on the logged-in user's RT code
-        const filteredData = user?.rtId 
-          ? data.filter((resident: Resident) => String(resident.rt).toUpperCase() === String(user.rtId).toUpperCase())
-          : data;
-        setResidentsList(filteredData);
+        // Data sudah dibatasi per RT oleh server
+        setResidentsList(data);
       } else {
         console.error("Data is not an array:", data);
         setResidentsList([]);
@@ -68,42 +72,74 @@ export function Residents() {
     setFormData(prev => ({ ...prev, [name]: value }));
   };
 
+  const openCreate = () => {
+    setEditingId(null);
+    setFormData(emptyForm());
+    setPassword("");
+    setFormError("");
+    setIsModalOpen(true);
+  };
+
+  const openEdit = (resident: Resident) => {
+    const { id, ...rest } = resident as any;
+    setEditingId(id);
+    setFormData({
+      ...emptyForm(),
+      ...rest,
+      nik: String(rest.nik ?? ""),
+      familyCardNumber: String(rest.familyCardNumber ?? ""),
+      phone: String(rest.phone ?? ""),
+    });
+    setPassword("");
+    setFormError("");
+    setIsModalOpen(true);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return;
+    setFormError("");
+    if (!/^\d{16}$/.test(String(formData.nik))) {
+      setFormError("NIK harus 16 digit angka.");
+      return;
+    }
     setIsSubmitting(true);
     try {
-      const response = await fetch('/api/residents', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(formData),
+      const response = await fetch(editingId ? `/api/residents/${editingId}` : '/api/residents', {
+        method: editingId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...formData, ...(password ? { password } : {}) }),
       });
-      
+      const data = await response.json().catch(() => ({}));
+
       if (response.ok) {
-        const newResident = await response.json();
-        setResidentsList([newResident, ...residentsList]);
+        setResidentsList(prev => editingId ? prev.map(r => r.id === editingId ? data : r) : [data, ...prev]);
         setIsModalOpen(false);
-        setFormData({
-          name: "",
-          nik: "",
-          familyCardNumber: "",
-          address: "",
-          rt: user?.rtId || "",
-          rw: "05",
-          status: "Tetap",
-          phone: "",
-          gender: "Laki-laki",
-          maritalStatus: "Lajang",
-          familyRelationship: "Kepala Keluarga"
-        });
+        setFormData(emptyForm());
+        setPassword("");
+        setEditingId(null);
+      } else {
+        setFormError(data.error || "Gagal menyimpan data warga.");
       }
     } catch (error) {
-      console.error("Failed to add resident:", error);
+      setFormError("Terjadi kesalahan koneksi.");
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleDelete = async (resident: Resident) => {
+    if (!confirm(`Hapus data ${resident.name}? Tindakan ini tidak bisa dibatalkan.\n\nGunakan "Mutasi" jika warga pindah atau meninggal.`)) return;
+    const response = await fetch(`/api/residents/${resident.id}`, { method: 'DELETE' });
+    if (response.ok) setResidentsList(prev => prev.filter(r => r.id !== resident.id));
+    else alert((await response.json().catch(() => ({}))).error || "Gagal menghapus data.");
+  };
+
+  const handleVerify = async (resident: Resident) => {
+    const response = await fetch(`/api/residents/${resident.id}/verify`, { method: 'POST' });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) setResidentsList(prev => prev.map(r => r.id === resident.id ? data : r));
+    else alert(data.error || "Gagal memverifikasi warga.");
   };
 
   const handleShowCard = (resident: Resident) => {
@@ -117,7 +153,7 @@ export function Residents() {
     try {
       const response = await fetch(`/api/residents/${resident.id}/family`);
       const data = await response.json();
-      setFamilyMembers(data);
+      setFamilyMembers(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("Failed to fetch family members:", error);
       setFamilyMembers([]);
@@ -156,6 +192,8 @@ export function Residents() {
       if (response.ok) {
         setIsMutationModalOpen(false);
         fetchResidents(); // Refresh list
+      } else {
+        alert((await response.json().catch(() => ({}))).error || "Gagal menyimpan mutasi.");
       }
     } catch (error) {
       console.error("Mutation failed:", error);
@@ -163,7 +201,7 @@ export function Residents() {
   };
 
   const handleExport = () => {
-    if (residentsList.length === 0) return;
+    if (filteredResidents.length === 0) return;
     
     const headers = [
       "ID", "Nama Lengkap", "NIK", "No. KK", "Alamat", "RT", "RW", 
@@ -172,7 +210,7 @@ export function Residents() {
     
     const csvContent = [
       headers.join(","),
-      ...residentsList.map(r => [
+      ...filteredResidents.map(r => [
         r.id,
         `"${r.name}"`,
         `"${r.nik}"`,
@@ -192,20 +230,43 @@ export function Residents() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `Data_Warga_RT01_RW05_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `Data_Warga_${user?.rtId || 'RT'}_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
+  const keyword = search.trim().toLowerCase();
+  const filteredResidents = residentsList.filter(r => {
+    const matchesSearch = !keyword
+      || String(r.name).toLowerCase().includes(keyword)
+      || String(r.nik).includes(keyword)
+      || String(r.familyCardNumber ?? '').includes(keyword)
+      || String(r.address ?? '').toLowerCase().includes(keyword);
+    const matchesStatus = statusFilter === "Semua"
+      || (statusFilter === "Menunggu Verifikasi" ? (r as any).verified === 'pending' : r.status === statusFilter);
+    return matchesSearch && matchesStatus;
+  });
+  const pendingCount = residentsList.filter(r => (r as any).verified === 'pending').length;
+
   return (
     <div className="space-y-6">
+      {pendingCount > 0 && (
+        <button
+          onClick={() => { setShowFilter(true); setStatusFilter("Menunggu Verifikasi"); }}
+          className="w-full text-left p-4 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 hover:bg-amber-100 transition-colors"
+        >
+          <strong>{pendingCount} pendaftar baru</strong> menunggu verifikasi. Klik untuk melihat.
+        </button>
+      )}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="relative w-full sm:w-64">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
           <input 
             type="text" 
-            placeholder="Cari nama atau NIK..." 
+            placeholder="Cari nama, NIK, KK, alamat..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
             className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
         </div>
@@ -217,12 +278,24 @@ export function Residents() {
             <Download size={18} />
             Export
           </button>
-          <button className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
-            <Filter size={18} />
-            Filter
-          </button>
-          <button 
-            onClick={() => setIsModalOpen(true)}
+          {showFilter ? (
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="flex-1 sm:flex-none px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              {["Semua", "Tetap", "Kontrak", "Kost", "Pindah", "Meninggal", "Menunggu Verifikasi"].map(st => (
+                <option key={st} value={st}>{st === "Semua" ? "Semua Status" : st}</option>
+              ))}
+            </select>
+          ) : (
+            <button onClick={() => setShowFilter(true)} className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 transition-colors">
+              <Filter size={18} />
+              Filter
+            </button>
+          )}
+          <button
+            onClick={openCreate}
             className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-200"
           >
             <Plus size={18} />
@@ -248,7 +321,13 @@ export function Residents() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {residentsList.map((resident) => (
+              {isLoading && (
+                <tr><td colSpan={9} className="px-6 py-10 text-center text-slate-400">Memuat data warga...</td></tr>
+              )}
+              {!isLoading && filteredResidents.length === 0 && (
+                <tr><td colSpan={9} className="px-6 py-10 text-center text-slate-400">Tidak ada data warga yang cocok.</td></tr>
+              )}
+              {filteredResidents.map((resident) => (
                 <tr key={resident.id} className="hover:bg-slate-50 transition-colors">
                   <td className="px-6 py-4 font-medium text-slate-900">{resident.name}</td>
                   <td className="px-6 py-4 text-slate-500 font-mono">{resident.nik}</td>
@@ -266,9 +345,21 @@ export function Residents() {
                         'bg-red-100 text-red-800'}`}>
                       {resident.status}
                     </span>
+                    {(resident as any).verified === 'pending' && (
+                      <span className="ml-1 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Belum diverifikasi</span>
+                    )}
                   </td>
                   <td className="px-6 py-4 flex gap-2">
-                    <button 
+                    {(resident as any).verified === 'pending' && (
+                      <button
+                        onClick={() => handleVerify(resident)}
+                        className="p-1 hover:bg-green-50 rounded text-green-600 hover:text-green-700"
+                        title="Verifikasi Pendaftar"
+                      >
+                        <CheckCircle size={18} />
+                      </button>
+                    )}
+                    <button
                       onClick={() => handleShowProfile(resident)}
                       className="p-1 hover:bg-blue-50 rounded text-blue-600 hover:text-blue-700"
                       title="Lihat Profil"
@@ -289,18 +380,28 @@ export function Residents() {
                     >
                       <FileText size={18} />
                     </button>
+                    <button
+                      onClick={() => openEdit(resident)}
+                      className="p-1 hover:bg-slate-100 rounded text-slate-600 hover:text-slate-800"
+                      title="Ubah Data"
+                    >
+                      <Pencil size={18} />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(resident)}
+                      className="p-1 hover:bg-red-50 rounded text-slate-400 hover:text-red-600"
+                      title="Hapus Data"
+                    >
+                      <Trash2 size={18} />
+                    </button>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <div className="px-6 py-4 border-t border-slate-200 flex items-center justify-between">
-          <p className="text-sm text-slate-500">Menampilkan 1-{residentsList.length} dari {residentsList.length} warga</p>
-          <div className="flex gap-2">
-            <button className="px-3 py-1 border border-slate-200 rounded text-sm disabled:opacity-50" disabled>Prev</button>
-            <button className="px-3 py-1 border border-slate-200 rounded text-sm hover:bg-slate-50">Next</button>
-          </div>
+        <div className="px-6 py-4 border-t border-slate-200">
+          <p className="text-sm text-slate-500">Menampilkan {filteredResidents.length} dari {residentsList.length} warga</p>
         </div>
       </div>
 
@@ -309,7 +410,7 @@ export function Residents() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-              <h3 className="text-lg font-semibold text-slate-800">Tambah Warga Baru</h3>
+              <h3 className="text-lg font-semibold text-slate-800">{editingId ? 'Ubah Data Warga' : 'Tambah Warga Baru'}</h3>
               <button 
                 onClick={() => setIsModalOpen(false)}
                 className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-colors"
@@ -317,7 +418,10 @@ export function Residents() {
                 <X size={20} />
               </button>
             </div>
-            <form onSubmit={handleSubmit} className="p-6 space-y-4">
+            <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
+              {formError && (
+                <div className="p-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600">{formError}</div>
+              )}
               <div className="space-y-2">
                 <label className="text-sm font-medium text-slate-700">Nama Lengkap</label>
                 <input 
@@ -366,6 +470,22 @@ export function Residents() {
                   onChange={handleInputChange}
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   placeholder="08xxxxxxxxxx"
+                />
+                <p className="text-xs text-slate-400">Dipakai untuk layanan & notifikasi WhatsApp.</p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">
+                  Password Login Warga {editingId && <span className="font-normal text-slate-400">(kosongkan jika tidak diubah)</span>}
+                </label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  minLength={6}
+                  autoComplete="new-password"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  placeholder="Minimal 6 karakter (opsional)"
                 />
               </div>
 
@@ -434,8 +554,8 @@ export function Residents() {
                     value={formData.rt}
                     onChange={handleInputChange}
                     required
-                    readOnly={!!user?.rtId}
-                    className={`w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${user?.rtId ? 'bg-slate-50 text-slate-500' : ''}`}
+                    readOnly={!!user?.rtId && user.rtId !== 'SUPERADMIN'}
+                    className={`w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 ${user?.rtId && user.rtId !== 'SUPERADMIN' ? 'bg-slate-50 text-slate-500' : ''}`}
                     placeholder="00"
                   />
                 </div>
@@ -446,8 +566,7 @@ export function Residents() {
                     name="rw"
                     value={formData.rw}
                     onChange={handleInputChange}
-                    readOnly
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-slate-50 text-slate-500"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
                 <div className="space-y-2">
@@ -461,6 +580,8 @@ export function Residents() {
                     <option value="Tetap">Tetap</option>
                     <option value="Kontrak">Kontrak</option>
                     <option value="Kost">Kost</option>
+                    {editingId && <option value="Pindah">Pindah</option>}
+                    {editingId && <option value="Meninggal">Meninggal</option>}
                   </select>
                 </div>
               </div>
@@ -478,7 +599,7 @@ export function Residents() {
                   disabled={isSubmitting}
                   className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors shadow-sm shadow-indigo-200 disabled:opacity-70 disabled:cursor-not-allowed"
                 >
-                  {isSubmitting ? 'Menyimpan...' : 'Simpan Data'}
+                  {isSubmitting ? 'Menyimpan...' : editingId ? 'Simpan Perubahan' : 'Simpan Data'}
                 </button>
               </div>
             </form>

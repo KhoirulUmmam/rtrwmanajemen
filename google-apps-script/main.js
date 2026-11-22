@@ -1,205 +1,229 @@
+// =============================================================================
+// Backend Google Sheets untuk Aplikasi Manajemen RT/RW
+// Deploy: Extensions > Apps Script > Deploy > New deployment > Web app
+//   - Execute as: Me
+//   - Who has access: Anyone
+// Setelah mengganti kode ini, WAJIB "Deploy > Manage deployments > Edit > New version".
+// =============================================================================
+
 // --- KONFIGURASI ---
-// Ganti ID Spreadsheet ini dengan ID Spreadsheet Anda yang sebenarnya
-const SPREADSHEET_ID = "YOUR_SPREADSHEET_ID"; 
-// Ganti ID Folder Drive ini dengan ID Folder tempat menyimpan foto Reports (Opsional, jika kosong akan di root)
-const UPLOAD_FOLDER_ID = ""; 
+const SPREADSHEET_ID = "YOUR_SPREADSHEET_ID"; // <- isi dengan ID spreadsheet Anda
+// Folder Drive untuk foto laporan (opsional, kosong = root Drive)
+const UPLOAD_FOLDER_ID = "";
+// Kunci rahasia antara server aplikasi dan script ini. Isi SAMA dengan GAS_SECRET di .env server.
+// Selama masih kosong, script menerima request tanpa kunci (mode transisi).
+const API_SECRET = "";
+
+// Urutan kolom setiap sheet (kolom pertama selalu "id").
+// Kolom baru selalu DITAMBAHKAN DI AKHIR agar data lama tidak bergeser.
+const SCHEMAS = {
+  Residents: ["id", "name", "nik", "address", "rt", "rw", "status", "phone", "gender", "maritalStatus", "familyRelationship", "familyCardNumber", "password", "verified"],
+  Announcements: ["id", "title", "content", "date", "rt"],
+  Letters: ["id", "residentName", "type", "status", "date", "rt", "content", "residentId"],
+  Transactions: ["id", "type", "amount", "category", "description", "date", "rt"],
+  Reports: ["id", "residentId", "residentName", "title", "description", "date", "status", "rt", "image"],
+  Admins: ["id", "username", "password", "role", "rtId", "name", "phone"],
+  Mutations: ["id", "residentId", "residentName", "type", "date", "details", "rt"],
+};
+
+// Kolom yang harus disimpan sebagai TEKS. Jika disimpan sebagai angka, Sheets membulatkan
+// NIK/KK 16 digit (presisi hanya 15 digit) dan membuang angka 0 di depan nomor HP.
+const TEXT_KEYS = ["nik", "familyCardNumber", "phone", "residentId", "rtId", "rt", "rw", "password"];
+
+function toCell(key, value) {
+  if (value === undefined || value === null) return "";
+  if (TEXT_KEYS.indexOf(key) >= 0 && value !== "") return "'" + String(value);
+  return value;
+}
+
+// =============================================================================
+// ENTRY POINT
+// =============================================================================
 
 function doGet(e) {
-  const action = e.parameter.action;
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  try {
+    checkSecret(e.parameter.secret);
+    const action = e.parameter.action || "";
+    const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
 
-  if (action == "getResidents") {
-    return getData(ss, "Residents"); 
-  } else if (action == "getAnnouncements") {
-    return getData(ss, "Announcements");
-  } else if (action == "getLetters") {
-    return getData(ss, "Letters");
-  } else if (action == "getTransactions") {
-    return getData(ss, "Transactions");
-  } else if (action == "getReports") {
-    return getData(ss, "Reports");
-  } else if (action == "getAdmins") {
-    return getData(ss, "Admins");
+    // Kompatibilitas nama action lama: getResidents, getAnnouncements, dst.
+    const legacy = {
+      getResidents: "Residents", getAnnouncements: "Announcements", getLetters: "Letters",
+      getTransactions: "Transactions", getReports: "Reports", getAdmins: "Admins", getMutations: "Mutations",
+    };
+    const sheetName = legacy[action] || (action === "list" ? e.parameter.sheet : null);
+    if (!sheetName || !SCHEMAS[sheetName]) return responseJSON({ error: "Action not found" });
+
+    return responseJSON(readRows(ss, sheetName));
+  } catch (err) {
+    return responseJSON({ error: err.toString() });
   }
-
-  return responseJSON({ error: "Action not found" });
 }
 
 function doPost(e) {
+  const lock = LockService.getScriptLock();
   try {
     const body = JSON.parse(e.postData.contents);
-    const action = body.action;
-    const data = body.data;
+    checkSecret(body.secret);
+    lock.waitLock(20000); // cegah ID bentrok saat dua request bersamaan
     const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const data = body.data || {};
 
-    if (action == "addResident") {
-      return addRow(ss, "Residents", data);
-    } else if (action == "updateResidentPhone") {
-      return updateResidentPhone(ss, data.nik, data.phone);
-    } else if (action == "addAnnouncement") {
-      return addRow(ss, "Announcements", data);
-    } else if (action == "addLetter") {
-      return addRow(ss, "Letters", data);
-    } else if (action == "addTransaction") {
-      return addRow(ss, "Transactions", data);
-    } else if (action == "addReport") {
-      return addReport(ss, data);
-    } else if (action == "updateReportStatus") {
-      return updateReportStatus(ss, data.id, data.status);
+    switch (body.action) {
+      // Generik
+      case "create": return responseJSON(createRow(ss, body.sheet, data));
+      case "update": return responseJSON(updateRow(ss, body.sheet, data.id, data));
+      case "delete": return responseJSON(deleteRow(ss, body.sheet, data.id));
+      case "addReport": return responseJSON(addReport(ss, data));
+
+      // Kompatibilitas action lama
+      case "addResident": return responseJSON(createRow(ss, "Residents", data));
+      case "addAnnouncement": return responseJSON(createRow(ss, "Announcements", data));
+      case "addLetter": return responseJSON(createRow(ss, "Letters", data));
+      case "addTransaction": return responseJSON(createRow(ss, "Transactions", data));
+      case "updateReportStatus": return responseJSON(updateRow(ss, "Reports", data.id, { status: data.status }));
+      case "updateResidentPhone": return responseJSON(updateResidentPhone(ss, data.nik, data.phone));
     }
-
     return responseJSON({ error: "Action not found" });
-  } catch (error) {
-    return responseJSON({ error: error.toString() });
+  } catch (err) {
+    return responseJSON({ error: err.toString() });
+  } finally {
+    lock.releaseLock();
   }
 }
 
-// --- HELPER FUNCTIONS ---
+// =============================================================================
+// HELPER
+// =============================================================================
 
-function getData(ss, sheetName) {
-  const ws = ss.getSheetByName(sheetName);
-  if (!ws) return responseJSON([]);
-  
+function checkSecret(secret) {
+  if (API_SECRET && secret !== API_SECRET) throw new Error("Unauthorized");
+}
+
+/** Ambil sheet; buat otomatis beserta header bila belum ada. */
+function getSheet(ss, sheetName) {
+  const schema = SCHEMAS[sheetName];
+  if (!schema) throw new Error("Sheet tidak dikenal: " + sheetName);
+
+  let ws = ss.getSheetByName(sheetName);
+  if (!ws) ws = ss.insertSheet(sheetName);
+  if (ws.getLastRow() === 0) {
+    ws.appendRow(schema);
+    ws.getRange(1, 1, 1, schema.length).setFontWeight("bold").setBackground("#f3f4f6");
+  }
+  return ws;
+}
+
+function readRows(ss, sheetName) {
+  const ws = getSheet(ss, sheetName);
+  const schema = SCHEMAS[sheetName];
   const lastRow = ws.getLastRow();
-  if (lastRow < 2) return responseJSON([]); // No data (only header)
+  if (lastRow < 2) return [];
 
-  const headers = ws.getRange(1, 1, 1, ws.getLastColumn()).getValues()[0];
-  const data = ws.getRange(2, 1, lastRow - 1, ws.getLastColumn()).getValues();
-
-  const result = data.map(row => {
-    let obj = {};
-    headers.forEach((header, index) => {
-      // Convert header to camelCase key (e.g., "Nama Lengkap" -> "namaLengkap")
-      // Simple conversion: lowercase and remove spaces for simplicity in this example
-      // Ideally, match headers to expected keys.
-      // For this example, we assume headers in sheet match keys or we map by index.
-      // Let's map by index based on standard schema.
-      obj[getHeaderKey(sheetName, index)] = row[index];
+  const values = ws.getRange(2, 1, lastRow - 1, schema.length).getValues();
+  return values
+    .filter(row => row[0] !== "" && row[0] !== null)
+    .map(row => {
+      const obj = {};
+      schema.forEach((key, i) => {
+        let v = row[i];
+        // Tanggal dikirim sebagai yyyy-mm-dd, bukan objek Date
+        if (v instanceof Date) v = Utilities.formatDate(v, Session.getScriptTimeZone(), "yyyy-MM-dd");
+        obj[key] = v;
+      });
+      return obj;
     });
-    return obj;
-  });
-
-  return responseJSON(result);
 }
 
-function getHeaderKey(sheetName, index) {
-  // Mapping index to key based on sheet
-  const schemas = {
-    "Residents": ["id", "name", "nik", "address", "rt", "rw", "status", "phone", "gender", "maritalStatus", "familyRelationship", "familyCardNumber", "password"],
-    "Announcements": ["id", "title", "content", "date", "rt"],
-    "Letters": ["id", "residentName", "type", "status", "date", "rt", "content"],
-    "Transactions": ["id", "type", "amount", "category", "description", "date", "rt"],
-    "Reports": ["id", "residentId", "residentName", "title", "description", "date", "status", "rt", "image"],
-    "Admins": ["id", "username", "password", "role", "rtId", "name"]
-  };
-  
-  const keys = schemas[sheetName] || [];
-  return keys[index] || `col${index}`;
+/** Cari nomor baris (1-based) berdasarkan id. */
+function findRowById(ws, id) {
+  const lastRow = ws.getLastRow();
+  if (lastRow < 2) return -1;
+  const ids = ws.getRange(2, 1, lastRow - 1, 1).getValues();
+  for (let i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]) === String(id)) return i + 2;
+  }
+  return -1;
 }
 
-function addRow(ss, sheetName, data) {
-  const ws = ss.getSheetByName(sheetName);
-  const newId = ws.getLastRow() == 0 ? 1 : (ws.getLastRow() < 2 ? 1 : ws.getRange(ws.getLastRow(), 1).getValue() + 1);
-  
-  // Prepare row data based on schema
-  const keys = getHeaderKey(sheetName, -1); // Dummy call to get schema keys logic if needed, but here we construct array
-  // Better: construct array based on schema order
-  const schema = {
-    "Residents": ["name", "nik", "address", "rt", "rw", "status", "phone", "gender", "maritalStatus", "familyRelationship", "familyCardNumber", "password"],
-    "Announcements": ["title", "content", "date", "rt"],
-    "Letters": ["residentName", "type", "status", "date", "rt", "content"],
-    "Transactions": ["type", "amount", "category", "description", "date", "rt"],
-    // Reports handled separately
-  };
+/** ID baru = ID terbesar + 1 (aman walau ada baris yang dihapus). */
+function nextId(ws) {
+  const lastRow = ws.getLastRow();
+  if (lastRow < 2) return 1;
+  const ids = ws.getRange(2, 1, lastRow - 1, 1).getValues().map(r => Number(r[0]) || 0);
+  return Math.max.apply(null, ids.concat([0])) + 1;
+}
 
-  if (!schema[sheetName]) return responseJSON({ error: "Schema not found" });
+function createRow(ss, sheetName, data) {
+  const ws = getSheet(ss, sheetName);
+  const schema = SCHEMAS[sheetName];
+  const id = nextId(ws);
+  const row = schema.map(key => (key === "id" ? id : toCell(key, data[key])));
+  ws.appendRow(row);
 
-  const rowData = [newId];
-  schema[sheetName].forEach(key => {
-    rowData.push(data[key] || "");
+  const obj = {};
+  schema.forEach((key, i) => (obj[key] = key === "id" ? id : (data[key] === undefined || data[key] === null ? "" : data[key])));
+  return { status: "success", id: id, data: obj };
+}
+
+/** Update sebagian kolom saja (kolom yang tidak dikirim tidak berubah). */
+function updateRow(ss, sheetName, id, data) {
+  const ws = getSheet(ss, sheetName);
+  const schema = SCHEMAS[sheetName];
+  const rowNum = findRowById(ws, id);
+  if (rowNum < 0) return { error: "Data tidak ditemukan" };
+
+  const range = ws.getRange(rowNum, 1, 1, schema.length);
+  const current = range.getValues()[0];
+  const row = current.slice();
+  const obj = {};
+  schema.forEach((key, i) => {
+    if (key !== "id" && data[key] !== undefined) {
+      row[i] = toCell(key, data[key]);
+      obj[key] = data[key] === null ? "" : data[key];
+    } else {
+      // Kolom teks yang tidak diubah ditulis ulang apa adanya sebagai teks
+      row[i] = key !== "id" && TEXT_KEYS.indexOf(key) >= 0 ? toCell(key, current[i]) : current[i];
+      obj[key] = current[i] instanceof Date ? Utilities.formatDate(current[i], Session.getScriptTimeZone(), "yyyy-MM-dd") : current[i];
+    }
   });
+  range.setValues([row]);
+  return { status: "success", data: obj };
+}
 
-  ws.appendRow(rowData);
-  return responseJSON({ status: "success", id: newId });
+function deleteRow(ss, sheetName, id) {
+  const ws = getSheet(ss, sheetName);
+  const rowNum = findRowById(ws, id);
+  if (rowNum < 0) return { error: "Data tidak ditemukan" };
+  ws.deleteRow(rowNum);
+  return { status: "success" };
 }
 
 function addReport(ss, data) {
-  const ws = ss.getSheetByName("Reports");
-  // If ID is not number (e.g. header), start at 1
-  let lastId = 0;
-  if (ws.getLastRow() > 1) {
-      lastId = Number(ws.getRange(ws.getLastRow(), 1).getValue()) || 0;
-  }
-  const newId = lastId + 1;
-
   let imageUrl = "";
   if (data.image) {
     try {
-      // Decode Base64
-      const blob = Utilities.newBlob(Utilities.base64Decode(data.image), "image/jpeg", `report_${newId}.jpg`);
-      
-      // Save to Drive
-      let folder;
-      if (UPLOAD_FOLDER_ID) {
-        folder = DriveApp.getFolderById(UPLOAD_FOLDER_ID);
-      } else {
-        folder = DriveApp.getRootFolder();
-      }
-      
+      const blob = Utilities.newBlob(Utilities.base64Decode(data.image), "image/jpeg", "report_" + Date.now() + ".jpg");
+      const folder = UPLOAD_FOLDER_ID ? DriveApp.getFolderById(UPLOAD_FOLDER_ID) : DriveApp.getRootFolder();
       const file = folder.createFile(blob);
       file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
-      imageUrl = file.getDownloadUrl(); // Or file.getUrl() for viewer link
-    } catch (e) {
-      imageUrl = "Error saving image: " + e.toString();
+      // Link thumbnail bisa langsung ditampilkan di <img>
+      imageUrl = "https://drive.google.com/thumbnail?sz=w1000&id=" + file.getId();
+    } catch (err) {
+      imageUrl = "";
     }
   }
-
-  ws.appendRow([
-    newId,
-    data.residentId,
-    data.residentName,
-    data.title,
-    data.description,
-    data.date,
-    data.status,
-    data.rt,
-    imageUrl // Column 9
-  ]);
-
-  return responseJSON({ status: "success", id: newId, imageUrl: imageUrl });
-}
-
-function updateReportStatus(ss, id, status) {
-  const ws = ss.getSheetByName("Reports");
-  const data = ws.getDataRange().getValues();
-  
-  // Find row with ID (Column 0)
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][0] == id) {
-      // Status is at index 6 (Column G -> 7th column)
-      ws.getRange(i + 1, 7).setValue(status);
-      return responseJSON({ status: "success" });
-    }
-  }
-  return responseJSON({ error: "Report not found" });
+  const result = createRow(ss, "Reports", Object.assign({}, data, { image: imageUrl }));
+  result.imageUrl = imageUrl;
+  return result;
 }
 
 function updateResidentPhone(ss, nik, newPhone) {
-  const ws = ss.getSheetByName("Residents");
-  const data = ws.getDataRange().getValues();
-  
-  // Find row with NIK (Column 2 -> Index 2)
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][2] == nik) {
-      // Phone is at index 7 (Column H -> 8th column)
-      ws.getRange(i + 1, 8).setValue(newPhone);
-      return responseJSON({ status: "success" });
-    }
-  }
-  return responseJSON({ error: "Resident not found" });
+  const resident = readRows(ss, "Residents").filter(r => String(r.nik) === String(nik))[0];
+  if (!resident) return { error: "Resident not found" };
+  return updateRow(ss, "Residents", resident.id, { phone: newPhone });
 }
 
 function responseJSON(data) {
-  return ContentService.createTextOutput(JSON.stringify(data))
-    .setMimeType(ContentService.MimeType.JSON);
+  return ContentService.createTextOutput(JSON.stringify(data)).setMimeType(ContentService.MimeType.JSON);
 }
